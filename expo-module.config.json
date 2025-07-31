@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["ReactNativeSunmiBarcodeScannerModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.sunmibarcodescanner.ReactNativeSunmiBarcodeScannerModule"]
+  }
+}
