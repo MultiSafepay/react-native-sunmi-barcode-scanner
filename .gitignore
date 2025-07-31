@@ -39,6 +39,16 @@ android.iml
 android/app/libs
 android/keystores/debug.keystore
 
+# Android NDK/CMake build artifacts
+android/src/main/jni/build/
+android/src/main/jni/.externalNativeBuild/
+android/.externalNativeBuild/
+**/CMakeCache.txt
+**/CMakeFiles/
+**/cmake_install.cmake
+**/Makefile
+**/compile_commands.json
+
 # Cocoapods
 #
 example/ios/Pods
