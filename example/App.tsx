@@ -29,6 +29,7 @@ export default function App() {
     const mode = ReactNativeSunmiBarcodeScanner.getScannerOperationMode();
     setCurrentMode(mode);
   }, []);
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView style={styles.container}>

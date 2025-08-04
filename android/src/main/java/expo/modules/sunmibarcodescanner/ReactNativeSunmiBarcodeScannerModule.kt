@@ -1,5 +1,7 @@
 package expo.modules.sunmibarcodescanner
 
+import android.app.Activity
+import android.view.KeyEvent
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.Promise
@@ -47,12 +49,51 @@ class ReactNativeSunmiBarcodeScannerModule : Module() {
       return@Function barcodeScanner.getScannerOperationMode().modeName
     }
 
+    Function("setScannerPriority") { priority: String ->
+      val scannerPriority = ScannerPriority.valueOf(priority)
+      barcodeScanner.setScannerPriority(context, scannerPriority)
+    }
+
+    Function("getScannerPriority") {
+      return@Function barcodeScanner.getScannerPriority().priorityName
+    }
+
+    AsyncFunction("getAvailableScanners") { promise: Promise ->
+      try {
+        val scanners = barcodeScanner.getAvailableScanners(context)
+        val scannersArray = scanners.map { scanner ->
+          mapOf(
+            "type" to scanner.type.typeName,
+            "isConnected" to scanner.isConnected,
+            "deviceName" to scanner.deviceName,
+            "pid" to scanner.pid,
+            "vid" to scanner.vid
+          )
+        }
+        promise.resolve(scannersArray)
+      } catch (e: Exception) {
+        promise.reject("SCANNER_DETECTION_ERROR", e.message, e)
+      }
+    }
+
+    Function("getCurrentScannerType") {
+      return@Function barcodeScanner.getCurrentScannerType().typeName
+    }
+
     Function("setScanTimeout") { timeout: Long ->
       barcodeScanner.setScanTimeout(timeout)
     }
 
     Function("setBeep") { enabled: Boolean ->
       barcodeScanner.setBeep(enabled)
+    }
+
+    Function("setToast") { enabled: Boolean ->
+      barcodeScanner.setToast(enabled)
+    }
+
+    Function("getToast") {
+      barcodeScanner.getToast()
     }
 
     AsyncFunction("scanQRCode")  { promise: Promise ->
