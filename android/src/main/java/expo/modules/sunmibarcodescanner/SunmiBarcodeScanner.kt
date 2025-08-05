@@ -68,12 +68,13 @@ class SunmiBarcodeScanner {
         private const val STORAGE_TEMP_HEX = "23" // # temporary setting
         private const val STORAGE_EVER_HEX = "40" // @ permanent setting
         
-        // USB scanner PID/VID combinations (from Sunmi documentation)
-        private val KNOWN_USB_SCANNERS = listOf(
-            Pair(4608, 1504),   // "4608,1504"
-            Pair(9492, 1529),   // "9492,1529"
-            Pair(34, 12879),    // "34,12879"
-            Pair(193, 12879)    // "193,12879"
+        // Default USB scanner VID/PID combinations from Sunmi's official documentation
+        // These can be extended dynamically via addCompatibleUsbScanner API
+        private val DEFAULT_USB_SCANNER_IDENTIFIERS = listOf(
+            "4608,1504",   // 0x1200,0x05E0 - Symbol scanner
+            "9492,1529",   // 0x2514,0x05F9 - POS scanner  
+            "34,12879",    // 0x0022,0x324F - SM-S100W
+            "193,12879"    // 0x00C1,0x324F - SM-S100W variant
         )
     }
 
@@ -93,6 +94,11 @@ class SunmiBarcodeScanner {
     
     // USB scanner properties
     private var usbDevices: List<UsbDevice> = emptyList()
+    
+    // Dynamic list of compatible USB scanner identifiers
+    private val compatibleUsbScanners = mutableListOf<String>().apply {
+        addAll(DEFAULT_USB_SCANNER_IDENTIFIERS)
+    }
 
     @OptIn(DelicateCoroutinesApi::class)
     fun scanQRCode(context: Context, promise: Promise) {
@@ -238,6 +244,149 @@ class SunmiBarcodeScanner {
     }
 
     /**
+     * Get all USB devices connected to the system
+     */
+    fun getAllUsbDevices(context: Context): List<Map<String, Any?>> {
+        val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+        val deviceList = usbManager.deviceList
+        val devices = mutableListOf<Map<String, Any?>>()
+        
+        for (device in deviceList.values) {
+            devices.add(mapOf(
+                "deviceName" to device.deviceName,
+                "vendorId" to device.vendorId,
+                "productId" to device.productId,
+                "pidVidKey" to "${device.productId},${device.vendorId}",
+                "deviceClass" to device.deviceClass,
+                "deviceSubclass" to device.deviceSubclass,
+                "deviceProtocol" to device.deviceProtocol,
+                "interfaceCount" to device.interfaceCount,
+                "isCompatible" to compatibleUsbScanners.contains("${device.productId},${device.vendorId}")
+            ))
+        }
+        
+        return devices
+    }
+
+    /**
+     * Add a USB scanner to the compatible list
+     */
+    fun addCompatibleUsbScanner(productId: Int, vendorId: Int): Boolean {
+        val pidVidKey = "$productId,$vendorId"
+        return if (!compatibleUsbScanners.contains(pidVidKey)) {
+            compatibleUsbScanners.add(pidVidKey)
+            true
+        } else {
+            false // Already exists
+        }
+    }
+
+    /**
+     * Remove a USB scanner from the compatible list
+     */
+    fun removeCompatibleUsbScanner(productId: Int, vendorId: Int): Boolean {
+        val pidVidKey = "$productId,$vendorId"
+        return compatibleUsbScanners.remove(pidVidKey)
+    }
+
+    /**
+     * Get the current list of compatible USB scanner identifiers
+     */
+    fun getCompatibleUsbScanners(): List<String> {
+        return compatibleUsbScanners.toList()
+    }
+
+    /**
+     * Reset compatible USB scanners to default list
+     */
+    fun resetCompatibleUsbScanners() {
+        compatibleUsbScanners.clear()
+        compatibleUsbScanners.addAll(DEFAULT_USB_SCANNER_IDENTIFIERS)
+    }
+
+    /**
+     * Set data distribution type following SunmiScanner.java approach
+     * USB scanners default to TYPE_KEYBOARD, don't support TYPE_KEYBOARD_AND_BROADCAST
+     * Serial scanners default to TYPE_KEYBOARD_AND_BROADCAST, support all parameters
+     */
+    fun setDataDistributeType(context: Context, type: String) {
+        // Convert string to internal type values
+        val usbType: Int
+        val serialKeyboard: Boolean
+        val serialBroadcast: Boolean
+        
+        when (type) {
+            "TYPE_KEYBOARD" -> {
+                usbType = 0
+                serialKeyboard = true
+                serialBroadcast = false
+            }
+            "TYPE_BROADCAST" -> {
+                usbType = 2
+                serialKeyboard = false
+                serialBroadcast = true
+            }
+            "TYPE_KEYBOARD_AND_BROADCAST" -> {
+                usbType = 0  // USB doesn't support both, defaults to keyboard
+                serialKeyboard = true
+                serialBroadcast = true
+            }
+            else -> {
+                throw Exception("Invalid data distribute type: $type")
+            }
+        }
+        
+        // 1. Configure USB scanners (following SunmiScanner.java approach)
+        val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+        val deviceList = usbManager.deviceList
+        
+        for (device in deviceList.values) {
+            val pidVidKey = "${device.productId},${device.vendorId}"
+            if (compatibleUsbScanners.contains(pidVidKey)) {
+                val intent = Intent(ACTION_USB_DEVICE_SETTING).apply {
+                    putExtra("name", device.deviceName ?: "")
+                    putExtra("pid", device.productId)
+                    putExtra("vid", device.vendorId)
+                    putExtra("type", usbType)
+                    putExtra("toast", toastEnabled)
+                }
+                context.sendBroadcast(intent)
+            }
+        }
+        
+        // 2. Configure Serial scanner
+        val serialIntent = Intent(ACTION_SCANNER_SERIAL_SETTING).apply {
+            putExtra("analog_key", serialKeyboard)
+            putExtra("broadcast", serialBroadcast)
+            putExtra("toast", toastEnabled)
+        }
+        context.sendBroadcast(serialIntent)
+    }
+    /**
+     * Set USB scanner mode (for testing different modes)
+     * 0 = Keyboard, 1 = KeyEvent, 2 = Broadcast, 3 = Acceleration (requires 1.0.18+)
+     */
+    fun setUsbScannerMode(context: Context, mode: Int) {
+        val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+        val deviceList = usbManager.deviceList
+        
+        // Find and configure all USB scanners (following SunmiScanner.java approach)
+        for (device in deviceList.values) {
+            val pidVidKey = "${device.productId},${device.vendorId}"
+            if (compatibleUsbScanners.contains(pidVidKey)) {
+                val intent = Intent(ACTION_USB_DEVICE_SETTING).apply {
+                    putExtra("name", device.deviceName ?: "")  // Use actual device name or empty
+                    putExtra("pid", device.productId)
+                    putExtra("vid", device.vendorId)
+                    putExtra("type", mode)
+                    putExtra("toast", toastEnabled)
+                }
+                context.sendBroadcast(intent)
+            }
+        }
+    }
+
+    /**
      * Set scanner operation mode (ON_DEMAND or CONTINUOUS)
      */
     fun setScannerOperationMode(context: Context, mode: ScannerOperationMode) {
@@ -300,13 +449,13 @@ class SunmiBarcodeScanner {
     fun getAvailableScanners(context: Context): List<ScannerInfo> {
         val scanners = mutableListOf<ScannerInfo>()
         
-        // Check USB scanners
+        // Check USB scanners dynamically (following SunmiScanner.java approach)
         val usbScanners = detectUsbScanners(context)
         usbScanners.forEach { device ->
             scanners.add(ScannerInfo(
                 type = ScannerType.USB,
                 isConnected = true,
-                deviceName = device.deviceName,
+                deviceName = device.deviceName ?: "USB Scanner",
                 pid = device.productId,
                 vid = device.vendorId
             ))
@@ -332,7 +481,8 @@ class SunmiBarcodeScanner {
     }
 
     /**
-     * Detect USB scanners by checking known PID/VID combinations
+     * Detect USB scanners by checking VID/PID against compatible scanners list
+     * Following the same approach as SunmiScanner.java - dynamic detection
      */
     private fun detectUsbScanners(context: Context): List<UsbDevice> {
         val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
@@ -340,8 +490,8 @@ class SunmiBarcodeScanner {
         val detectedScanners = mutableListOf<UsbDevice>()
         
         for (device in deviceList.values) {
-            val pidVidPair = Pair(device.productId, device.vendorId)
-            if (KNOWN_USB_SCANNERS.contains(pidVidPair)) {
+            val pidVidKey = "${device.productId},${device.vendorId}"
+            if (compatibleUsbScanners.contains(pidVidKey)) {
                 detectedScanners.add(device)
             }
         }
@@ -430,29 +580,35 @@ class SunmiBarcodeScanner {
     }
 
     /**
-     * Configure USB scanner
+     * Configure USB scanner using dynamic detection (following SunmiScanner.java approach)
      */
     private fun configureUsbScanner(context: Context) {
-        val usbScanners = detectUsbScanners(context)
-        if (usbScanners.isEmpty()) {
-            throw Exception("USB scanner not available")
-        }
-        
-        // Configure first available USB scanner
-        val device = usbScanners.first()
+        val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+        val deviceList = usbManager.deviceList
+        var configuredCount = 0
         
         // For USB scanners, we'll primarily use broadcast mode (type 2)
         // This avoids the complexity of KeyEvent handling in Expo modules
         val usbDataType = 2  // Broadcast mode
         
-        val intent = Intent(ACTION_USB_DEVICE_SETTING).apply {
-            putExtra("name", device.deviceName)
-            putExtra("pid", device.productId)
-            putExtra("vid", device.vendorId)
-            putExtra("type", usbDataType)
-            putExtra("toast", toastEnabled)
+        for (device in deviceList.values) {
+            val pidVidKey = "${device.productId},${device.vendorId}"
+            if (compatibleUsbScanners.contains(pidVidKey)) {
+                val intent = Intent(ACTION_USB_DEVICE_SETTING).apply {
+                    putExtra("name", device.deviceName ?: "")  // Use actual device name
+                    putExtra("pid", device.productId)
+                    putExtra("vid", device.vendorId)
+                    putExtra("type", usbDataType)
+                    putExtra("toast", toastEnabled)
+                }
+                context.sendBroadcast(intent)
+                configuredCount++
+            }
         }
-        context.sendBroadcast(intent)
+        
+        if (configuredCount == 0) {
+            throw Exception("No USB scanners found to configure")
+        }
         
         // Setup broadcast receiver for USB scanners (same as serial)
         setupBroadcastReceiver(context)

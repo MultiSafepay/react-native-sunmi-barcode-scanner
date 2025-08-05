@@ -10,6 +10,10 @@ export type ScannerPriority =
   | "USB_ONLY"
   | "SERIAL_ONLY";
 export type ScannerType = "USB" | "SERIAL" | "BOTH" | "NONE";
+export type DataDistributeType =
+  | "TYPE_KEYBOARD"
+  | "TYPE_BROADCAST"
+  | "TYPE_KEYBOARD_AND_BROADCAST";
 
 export interface ScannerInfo {
   type: ScannerType;
@@ -17,6 +21,18 @@ export interface ScannerInfo {
   deviceName: string | null;
   pid: number | null;
   vid: number | null;
+}
+
+export interface UsbDeviceInfo {
+  deviceName: string | null;
+  vendorId: number;
+  productId: number;
+  pidVidKey: string;
+  deviceClass: number;
+  deviceSubclass: number;
+  deviceProtocol: number;
+  interfaceCount: number;
+  isCompatible: boolean;
 }
 
 class PlatformNotSupportedError extends Error {
@@ -46,6 +62,13 @@ declare class ReactNativeSunmiBarcodeScannerModuleNative extends NativeModule<Re
   setBeep(enabled: boolean): void;
   setToast(enabled: boolean): void;
   getToast(): boolean;
+  setUsbScannerMode(mode: number): void;
+  setDataDistributeType(type: DataDistributeType): void;
+  getAllUsbDevices(): Promise<UsbDeviceInfo[]>;
+  addCompatibleUsbScanner(productId: number, vendorId: number): boolean;
+  removeCompatibleUsbScanner(productId: number, vendorId: number): boolean;
+  getCompatibleUsbScanners(): string[];
+  resetCompatibleUsbScanners(): void;
   scanQRCode: () => Promise<string>;
   cancelScan: () => Promise<void>;
 }
@@ -112,6 +135,41 @@ const ReactNativeSunmiBarcodeScannerModule = {
   getToast(): boolean {
     checkPlatform();
     return nativeModule!.getToast();
+  },
+
+  setUsbScannerMode(mode: number): void {
+    checkPlatform();
+    nativeModule!.setUsbScannerMode(mode);
+  },
+
+  setDataDistributeType(type: DataDistributeType): void {
+    checkPlatform();
+    nativeModule!.setDataDistributeType(type);
+  },
+
+  async getAllUsbDevices(): Promise<UsbDeviceInfo[]> {
+    checkPlatform();
+    return nativeModule!.getAllUsbDevices();
+  },
+
+  addCompatibleUsbScanner(productId: number, vendorId: number): boolean {
+    checkPlatform();
+    return nativeModule!.addCompatibleUsbScanner(productId, vendorId);
+  },
+
+  removeCompatibleUsbScanner(productId: number, vendorId: number): boolean {
+    checkPlatform();
+    return nativeModule!.removeCompatibleUsbScanner(productId, vendorId);
+  },
+
+  getCompatibleUsbScanners(): string[] {
+    checkPlatform();
+    return nativeModule!.getCompatibleUsbScanners();
+  },
+
+  resetCompatibleUsbScanners(): void {
+    checkPlatform();
+    nativeModule!.resetCompatibleUsbScanners();
   },
 
   async scanQRCode(): Promise<string> {

@@ -96,6 +96,39 @@ class ReactNativeSunmiBarcodeScannerModule : Module() {
       barcodeScanner.getToast()
     }
 
+    Function("setUsbScannerMode") { mode: Int ->
+      barcodeScanner.setUsbScannerMode(context, mode)
+    }
+
+    Function("setDataDistributeType") { type: String ->
+      barcodeScanner.setDataDistributeType(context, type)
+    }
+
+    AsyncFunction("getAllUsbDevices") { promise: Promise ->
+      try {
+        val devices = barcodeScanner.getAllUsbDevices(context)
+        promise.resolve(devices)
+      } catch (e: Exception) {
+        promise.reject("USB_DEVICE_ERROR", e.message, e)
+      }
+    }
+
+    Function("addCompatibleUsbScanner") { productId: Int, vendorId: Int ->
+      barcodeScanner.addCompatibleUsbScanner(productId, vendorId)
+    }
+
+    Function("removeCompatibleUsbScanner") { productId: Int, vendorId: Int ->
+      barcodeScanner.removeCompatibleUsbScanner(productId, vendorId)
+    }
+
+    Function("getCompatibleUsbScanners") {
+      barcodeScanner.getCompatibleUsbScanners()
+    }
+
+    Function("resetCompatibleUsbScanners") {
+      barcodeScanner.resetCompatibleUsbScanners()
+    }
+
     AsyncFunction("scanQRCode")  { promise: Promise ->
       barcodeScanner.scanQRCode(context, promise)
     }
