@@ -80,6 +80,7 @@ class SunmiBarcodeScanner {
     private var operationMode = ScannerOperationMode.CONTINUOUS
     private var scannerPriority = ScannerPriority.PREFER_USB
     private var activeScannerType = ScannerType.NONE
+    private var currentUsbDataType = 2  // Default to broadcast mode
     private var broadcastReceiver: BroadcastReceiver? = null
     private var pendingPromise: Promise? = null
     private var isReceiverRegistered = false
@@ -143,32 +144,17 @@ class SunmiBarcodeScanner {
             return
         }
         
-        // Setup broadcast receiver for USB scanner (same as serial)
-        setupBroadcastReceiver(context)
-        
-        // Set timeout (USB scanners typically use default timeout)
+        // USB scanners use default timeout
         val effectiveTimeout = scanTimeout
         
-        // Start scan timeout
-        scanJob = GlobalScope.launch(Dispatchers.Main) {
-            try {
-                delay(effectiveTimeout)
-                // Timeout reached
-                cleanupScan()
-                promise.rejectWithSunmiError(SunmiBarcodeScannerException.SCAN_TIMEOUT, "Scan timeout after ${effectiveTimeout}ms")
-            } catch (e: CancellationException) {
-                // Scan was cancelled or completed
-            }
-        }
+        // Start scanning with common logic
+        startScanningWithTimeout(context, promise, effectiveTimeout)
     }
 
     /**
      * Handle scanning for Serial scanners
      */
     private fun handleSerialScanning(context: Context, promise: Promise) {
-        // Setup broadcast receiver
-        setupBroadcastReceiver(context)
-        
         // Configure scanner current operation mode
         applyOperationModeSettings(context, operationMode)
 
@@ -178,13 +164,24 @@ class SunmiBarcodeScanner {
             ScannerOperationMode.CONTINUOUS -> scanTimeout  // Use configured timeout (default 10s)
         }
 
+        // Start scanning with common logic
+        startScanningWithTimeout(context, promise, effectiveTimeout)
+    }
+
+    /**
+     * Common scanning logic shared between USB and Serial scanners
+     */
+    private fun startScanningWithTimeout(context: Context, promise: Promise, timeoutMs: Long) {
+        // Setup broadcast receiver for both USB and Serial scanners
+        setupBroadcastReceiver(context)
+        
         // Start scan timeout
         scanJob = GlobalScope.launch(Dispatchers.Main) {
             try {
-                delay(effectiveTimeout)
+                delay(timeoutMs)
                 // Timeout reached
                 cleanupScan()
-                promise.rejectWithSunmiError(SunmiBarcodeScannerException.SCAN_TIMEOUT, "Scan timeout after ${effectiveTimeout}ms")
+                promise.rejectWithSunmiError(SunmiBarcodeScannerException.SCAN_TIMEOUT, "Scan timeout after ${timeoutMs}ms")
             } catch (e: CancellationException) {
                 // Scan was cancelled or completed
             }
@@ -296,6 +293,44 @@ class SunmiBarcodeScanner {
     }
 
     /**
+     * Private helper method to configure USB scanners with specified data type
+     */
+    private fun configureUsbScannersWithType(context: Context, usbDataType: Int): Int {
+        val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+        val deviceList = usbManager.deviceList
+        var configuredCount = 0
+        
+        for (device in deviceList.values) {
+            val pidVidKey = "${device.productId},${device.vendorId}"
+            if (compatibleUsbScanners.contains(pidVidKey)) {
+                val intent = Intent(ACTION_USB_DEVICE_SETTING).apply {
+                    putExtra("name", device.deviceName ?: "")
+                    putExtra("pid", device.productId)
+                    putExtra("vid", device.vendorId)
+                    putExtra("type", usbDataType)
+                    putExtra("toast", toastEnabled)
+                }
+                context.sendBroadcast(intent)
+                configuredCount++
+            }
+        }
+        
+        return configuredCount
+    }
+
+    /**
+     * Private helper method to configure Serial scanner with specified settings
+     */
+    private fun configureSerialScannerWithSettings(context: Context, enableKeyboard: Boolean, enableBroadcast: Boolean) {
+        val intent = Intent(ACTION_SCANNER_SERIAL_SETTING).apply {
+            putExtra("analog_key", enableKeyboard)
+            putExtra("broadcast", enableBroadcast)
+            putExtra("toast", toastEnabled)
+        }
+        context.sendBroadcast(intent)
+    }
+
+    /**
      * Set data distribution type following SunmiScanner.java approach
      * USB scanners default to TYPE_KEYBOARD, don't support TYPE_KEYBOARD_AND_BROADCAST
      * Serial scanners default to TYPE_KEYBOARD_AND_BROADCAST, support all parameters
@@ -327,54 +362,50 @@ class SunmiBarcodeScanner {
             }
         }
         
-        // 1. Configure USB scanners (following SunmiScanner.java approach)
-        val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
-        val deviceList = usbManager.deviceList
+        // Update current USB data type
+        currentUsbDataType = usbType
         
-        for (device in deviceList.values) {
-            val pidVidKey = "${device.productId},${device.vendorId}"
-            if (compatibleUsbScanners.contains(pidVidKey)) {
-                val intent = Intent(ACTION_USB_DEVICE_SETTING).apply {
-                    putExtra("name", device.deviceName ?: "")
-                    putExtra("pid", device.productId)
-                    putExtra("vid", device.vendorId)
-                    putExtra("type", usbType)
-                    putExtra("toast", toastEnabled)
-                }
-                context.sendBroadcast(intent)
-            }
-        }
+        // 1. Configure USB scanners using helper method
+        configureUsbScannersWithType(context, usbType)
         
-        // 2. Configure Serial scanner
-        val serialIntent = Intent(ACTION_SCANNER_SERIAL_SETTING).apply {
-            putExtra("analog_key", serialKeyboard)
-            putExtra("broadcast", serialBroadcast)
-            putExtra("toast", toastEnabled)
-        }
-        context.sendBroadcast(serialIntent)
+        // 2. Configure Serial scanner using helper method
+        configureSerialScannerWithSettings(context, serialKeyboard, serialBroadcast)
     }
+
     /**
      * Set USB scanner mode (for testing different modes)
      * 0 = Keyboard, 1 = KeyEvent, 2 = Broadcast, 3 = Acceleration (requires 1.0.18+)
      */
     fun setUsbScannerMode(context: Context, mode: Int) {
-        val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
-        val deviceList = usbManager.deviceList
+        // Update current USB data type
+        currentUsbDataType = mode
         
-        // Find and configure all USB scanners (following SunmiScanner.java approach)
-        for (device in deviceList.values) {
-            val pidVidKey = "${device.productId},${device.vendorId}"
-            if (compatibleUsbScanners.contains(pidVidKey)) {
-                val intent = Intent(ACTION_USB_DEVICE_SETTING).apply {
-                    putExtra("name", device.deviceName ?: "")  // Use actual device name or empty
-                    putExtra("pid", device.productId)
-                    putExtra("vid", device.vendorId)
-                    putExtra("type", mode)
-                    putExtra("toast", toastEnabled)
-                }
-                context.sendBroadcast(intent)
-            }
+        // Configure all USB scanners with the new mode
+        configureUsbScannersWithType(context, mode)
+    }
+
+    /**
+     * Get current USB scanner data type
+     * 0 = Keyboard, 1 = KeyEvent, 2 = Broadcast, 3 = Acceleration
+     */
+    fun getCurrentUsbDataType(): Int {
+        return currentUsbDataType
+    }
+
+    /**
+     * Set USB scanner data type with string values for easier API usage
+     * Extends setUsbScannerMode with string-based configuration
+     */
+    fun setUsbDataType(context: Context, type: String) {
+        val usbType = when (type) {
+            "KEYBOARD", "TYPE_KEYBOARD" -> 0
+            "KEYEVENT", "TYPE_KEYEVENT" -> 1
+            "BROADCAST", "TYPE_BROADCAST" -> 2
+            "ACCELERATION", "TYPE_ACCELERATION" -> 3
+            else -> throw Exception("Invalid USB data type: $type. Valid values: KEYBOARD, KEYEVENT, BROADCAST, ACCELERATION")
         }
+        
+        setUsbScannerMode(context, usbType)
     }
 
     /**
@@ -582,28 +613,8 @@ class SunmiBarcodeScanner {
      * Configure USB scanner using dynamic detection (following SunmiScanner.java approach)
      */
     private fun configureUsbScanner(context: Context) {
-        val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
-        val deviceList = usbManager.deviceList
-        var configuredCount = 0
-        
-        // For USB scanners, we'll primarily use broadcast mode (type 2)
-        // This avoids the complexity of KeyEvent handling in Expo modules
-        val usbDataType = 2  // Broadcast mode
-        
-        for (device in deviceList.values) {
-            val pidVidKey = "${device.productId},${device.vendorId}"
-            if (compatibleUsbScanners.contains(pidVidKey)) {
-                val intent = Intent(ACTION_USB_DEVICE_SETTING).apply {
-                    putExtra("name", device.deviceName ?: "")  // Use actual device name
-                    putExtra("pid", device.productId)
-                    putExtra("vid", device.vendorId)
-                    putExtra("type", usbDataType)
-                    putExtra("toast", toastEnabled)
-                }
-                context.sendBroadcast(intent)
-                configuredCount++
-            }
-        }
+        // Configure all USB scanners with current data type
+        val configuredCount = configureUsbScannersWithType(context, currentUsbDataType)
         
         if (configuredCount == 0) {
             throw Exception("No USB scanners found to configure")
@@ -617,13 +628,8 @@ class SunmiBarcodeScanner {
      * Configure Serial scanner (existing implementation)
      */
     private fun configureSerialScanner(context: Context) {
-        // Enable broadcast output for serial scanner
-        val intent = Intent(ACTION_SCANNER_SERIAL_SETTING).apply {
-            putExtra("analog_key", false)  // Disable keyboard output
-            putExtra("broadcast", true)    // Enable broadcast output
-            putExtra("toast", toastEnabled)       // Use dynamic toast setting
-        }
-        context.sendBroadcast(intent)
+        // Configure serial scanner with default broadcast mode settings
+        configureSerialScannerWithSettings(context, false, true)
 
         // Apply current operation mode
         applyOperationModeSettings(context, operationMode)

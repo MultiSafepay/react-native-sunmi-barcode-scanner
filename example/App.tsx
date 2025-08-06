@@ -3,9 +3,11 @@ import { useState, useEffect } from "react";
 import {
   Alert,
   Button,
+  Modal,
   SafeAreaView,
   ScrollView,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
@@ -21,10 +23,64 @@ export default function App() {
     "ON_DEMAND"
   );
 
+  // State for VID/PID input dialog
+  const [showVidPidDialog, setShowVidPidDialog] = useState(false);
+  const [vidInput, setVidInput] = useState("");
+  const [pidInput, setPidInput] = useState("");
+
+  const handleAddScanner = () => {
+    try {
+      // Parse VID and PID (support both hex and decimal)
+      let vid: number;
+      let pid: number;
+
+      if (vidInput.startsWith("0x") || vidInput.startsWith("0X")) {
+        vid = parseInt(vidInput, 16);
+      } else {
+        vid = parseInt(vidInput, 10);
+      }
+
+      if (pidInput.startsWith("0x") || pidInput.startsWith("0X")) {
+        pid = parseInt(pidInput, 16);
+      } else {
+        pid = parseInt(pidInput, 10);
+      }
+
+      if (isNaN(vid) || isNaN(pid) || vid < 0 || pid < 0) {
+        Alert.alert(
+          "Error",
+          "Invalid VID/PID format. Please enter valid numbers (decimal or hex with 0x prefix)"
+        );
+        return;
+      }
+
+      const added = ReactNativeSunmiBarcodeScanner.addCompatibleUsbScanner(
+        pid,
+        vid
+      );
+
+      Alert.alert(
+        "Add Scanner",
+        added
+          ? `Added scanner VID: 0x${vid.toString(16).toUpperCase()}, PID: 0x${pid.toString(16).toUpperCase()}`
+          : "Scanner already in compatible list"
+      );
+
+      // Reset dialog
+      setShowVidPidDialog(false);
+      setVidInput("");
+      setPidInput("");
+    } catch (error) {
+      Alert.alert("Error", (error as Error).message);
+    }
+  };
+
   useEffect(() => {
-    // Initialize scanner in ON_DEMAND mode when app starts
+    ReactNativeSunmiBarcodeScanner.addCompatibleUsbScanner(16389, 1529); // Datalogic 3450VSi
+
     ReactNativeSunmiBarcodeScanner.initializeScanner();
     setIsInitialized(true);
+
     // Get current mode
     const mode = ReactNativeSunmiBarcodeScanner.getScannerOperationMode();
     setCurrentMode(mode);
@@ -34,7 +90,12 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <ScrollView style={styles.container}>
         <Text style={styles.header}>Sunmi Barcode Scanner SDK</Text>
-        <Text style={styles.status}>Current scanner mode: {currentMode}</Text>
+        <View>
+          <Text style={styles.status}>Current scanner mode: {currentMode}</Text>
+          <Text style={styles.status}>
+            {`Current scanner: ${ReactNativeSunmiBarcodeScanner.getCurrentScannerType()}`}
+          </Text>
+        </View>
         {/* <Group name="Set Scanner Mode">
           <View style={styles.buttonRow}>
             <Button
@@ -206,42 +267,9 @@ export default function App() {
               disabled={inProgress}
               title="Add Scanner by VID/PID"
               onPress={() => {
-                // Example: Add a custom USB scanner (you can modify these values)
-                Alert.prompt(
-                  "Add USB Scanner",
-                  "Enter VID,PID (e.g., 0x05F9,0x2206):",
-                  (input) => {
-                    try {
-                      const [vidStr, pidStr] = input.split(",");
-                      const vid = parseInt(vidStr.trim(), 16);
-                      const pid = parseInt(pidStr.trim(), 16);
-
-                      if (isNaN(vid) || isNaN(pid)) {
-                        Alert.alert(
-                          "Error",
-                          "Invalid VID/PID format. Use hex format like 0x05F9,0x2206"
-                        );
-                        return;
-                      }
-
-                      const added =
-                        ReactNativeSunmiBarcodeScanner.addCompatibleUsbScanner(
-                          pid,
-                          vid
-                        );
-                      Alert.alert(
-                        "Add Scanner",
-                        added
-                          ? `Added scanner VID: 0x${vid.toString(16).toUpperCase()}, PID: 0x${pid.toString(16).toUpperCase()}`
-                          : "Scanner already in compatible list"
-                      );
-                    } catch (error) {
-                      Alert.alert("Error", (error as Error).message);
-                    }
-                  },
-                  "plain-text",
-                  "0x05F9,0x2206"
-                );
+                setVidInput("");
+                setPidInput("");
+                setShowVidPidDialog(true);
               }}
             />
             <Button
@@ -287,6 +315,58 @@ export default function App() {
           />
         </Group>
       </ScrollView>
+
+      {/* VID/PID Input Dialog */}
+      <Modal
+        visible={showVidPidDialog}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowVidPidDialog(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Add USB Scanner</Text>
+            <Text style={styles.modalSubtitle}>
+              Enter VID and PID (decimal or hex with 0x prefix)
+            </Text>
+
+            <Text style={styles.inputLabel}>VID (Vendor ID):</Text>
+            <TextInput
+              style={styles.textInput}
+              value={vidInput}
+              onChangeText={setVidInput}
+              placeholder="e.g., 0x05F9 or 1529"
+              placeholderTextColor="#999"
+            />
+
+            <Text style={styles.inputLabel}>PID (Product ID):</Text>
+            <TextInput
+              style={styles.textInput}
+              value={pidInput}
+              onChangeText={setPidInput}
+              placeholder="e.g., 0x2206 or 8710"
+              placeholderTextColor="#999"
+            />
+
+            <View style={styles.modalButtonRow}>
+              <Button
+                title="Cancel"
+                color="#999"
+                onPress={() => {
+                  setShowVidPidDialog(false);
+                  setVidInput("");
+                  setPidInput("");
+                }}
+              />
+              <Button
+                title="Add Scanner"
+                onPress={handleAddScanner}
+                disabled={!vidInput.trim() || !pidInput.trim()}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -307,7 +387,6 @@ const styles = {
   },
   status: {
     fontSize: 16,
-    margin: 20,
     color: "#666",
     textAlign: "center" as const,
   },
@@ -335,5 +414,49 @@ const styles = {
     justifyContent: "center" as const,
     gap: 10,
     paddingVertical: 5,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center" as const,
+    alignItems: "center" as const,
+  },
+  modalContent: {
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    padding: 20,
+    margin: 20,
+    minWidth: 300,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "bold" as const,
+    marginBottom: 10,
+    textAlign: "center" as const,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 20,
+    textAlign: "center" as const,
+  },
+  inputLabel: {
+    fontSize: 16,
+    fontWeight: "bold" as const,
+    marginBottom: 5,
+    marginTop: 10,
+  },
+  textInput: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 5,
+    padding: 10,
+    fontSize: 16,
+    backgroundColor: "#f9f9f9",
+  },
+  modalButtonRow: {
+    flexDirection: "row" as const,
+    justifyContent: "space-around" as const,
+    marginTop: 20,
   },
 };
