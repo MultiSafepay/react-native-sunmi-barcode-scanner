@@ -28,6 +28,10 @@ export default function App() {
   const [vidInput, setVidInput] = useState("");
   const [pidInput, setPidInput] = useState("");
 
+  // State for USB device interfaces
+  const [usbDevices, setUsbDevices] = useState<any[]>([]);
+  const [showInterfaces, setShowInterfaces] = useState(false);
+
   const handleAddScanner = () => {
     try {
       // Parse VID and PID (support both hex and decimal)
@@ -72,6 +76,19 @@ export default function App() {
       setPidInput("");
     } catch (error) {
       Alert.alert("Error", (error as Error).message);
+    }
+  };
+
+  const loadUsbDevices = async () => {
+    try {
+      const devices = await ReactNativeSunmiBarcodeScanner.getAllUsbDevices();
+      setUsbDevices(devices);
+      setShowInterfaces(true);
+    } catch (error) {
+      Alert.alert(
+        "Error",
+        "Failed to load USB devices: " + (error as Error).message
+      );
     }
   };
 
@@ -286,6 +303,111 @@ export default function App() {
             />
           </View>
         </Group>
+        <Group name="USB Device Interfaces (Troubleshooting)">
+          <Text style={styles.groupHeader}>
+            Analyze USB device interfaces for troubleshooting:
+          </Text>
+          <View style={styles.buttonRow}>
+            <Button title="Load USB Devices" onPress={loadUsbDevices} />
+            <Button
+              title={showInterfaces ? "Hide Interfaces" : "Show Interfaces"}
+              onPress={() => setShowInterfaces(!showInterfaces)}
+              disabled={usbDevices.length === 0}
+            />
+          </View>
+          {showInterfaces && usbDevices.length > 0 && (
+            <ScrollView style={styles.interfaceList}>
+              {usbDevices.map((device, index) => (
+                <View key={index} style={styles.deviceInfo}>
+                  <Text style={styles.deviceHeader}>
+                    📱 {device.deviceName || "Unknown Device"}
+                  </Text>
+                  <Text style={styles.deviceDetail}>
+                    VID: 0x
+                    {device.vendorId
+                      .toString(16)
+                      .toUpperCase()
+                      .padStart(4, "0")}{" "}
+                    ({device.vendorId})
+                  </Text>
+                  <Text style={styles.deviceDetail}>
+                    PID: 0x
+                    {device.productId
+                      .toString(16)
+                      .toUpperCase()
+                      .padStart(4, "0")}{" "}
+                    ({device.productId})
+                  </Text>
+                  <Text style={styles.deviceDetail}>
+                    Class: {device.deviceClass} | Subclass:{" "}
+                    {device.deviceSubclass} | Protocol: {device.deviceProtocol}
+                  </Text>
+                  <Text style={styles.deviceDetail}>
+                    Compatible: {device.isCompatible ? "✅ Yes" : "❌ No"} |
+                    Permission: {device.hasPermission ? "✅ Yes" : "❌ No"}
+                  </Text>
+
+                  {device.interfaces && device.interfaces.length > 0 && (
+                    <View style={styles.interfaceContainer}>
+                      <Text style={styles.interfaceHeader}>
+                        🔌 Interfaces ({device.interfaces.length}):
+                      </Text>
+                      {device.interfaces.map(
+                        (iface: any, ifaceIndex: number) => (
+                          <View key={ifaceIndex} style={styles.interfaceItem}>
+                            <Text style={styles.interfaceText}>
+                              Interface {iface.id}: Class {iface.interfaceClass}
+                              (Sub: {iface.interfaceSubclass}, Proto:{" "}
+                              {iface.interfaceProtocol})
+                            </Text>
+                            <Text style={styles.interfaceText}>
+                              Endpoints: {iface.endpointCount} | Name:{" "}
+                              {iface.name || "N/A"}
+                            </Text>
+                          </View>
+                        )
+                      )}
+                    </View>
+                  )}
+
+                  {device.isCompatible && !device.hasPermission && (
+                    <View style={styles.buttonRow}>
+                      <Button
+                        title="Request Permission"
+                        onPress={() => {
+                          const result =
+                            ReactNativeSunmiBarcodeScanner.requestUsbPermission(
+                              device.vendorId,
+                              device.productId
+                            );
+                          Alert.alert(
+                            "USB Permission",
+                            result
+                              ? "Permission already granted"
+                              : "Permission request sent"
+                          );
+                        }}
+                      />
+                      <Button
+                        title="Test Modes"
+                        onPress={() => {
+                          ReactNativeSunmiBarcodeScanner.testUsbScannerModes(
+                            device.vendorId,
+                            device.productId
+                          );
+                          Alert.alert(
+                            "Testing",
+                            "Testing all USB modes for this device. Check logs for details."
+                          );
+                        }}
+                      />
+                    </View>
+                  )}
+                </View>
+              ))}
+            </ScrollView>
+          )}
+        </Group>
         <Group name="Scanner API">
           <Button
             disabled={inProgress || !isInitialized}
@@ -458,5 +580,52 @@ const styles = {
     flexDirection: "row" as const,
     justifyContent: "space-around" as const,
     marginTop: 20,
+  },
+  interfaceList: {
+    maxHeight: 400,
+    marginTop: 10,
+  },
+  deviceInfo: {
+    backgroundColor: "#f8f9fa",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#e9ecef",
+  },
+  deviceHeader: {
+    fontSize: 16,
+    fontWeight: "bold" as const,
+    color: "#495057",
+    marginBottom: 8,
+  },
+  deviceDetail: {
+    fontSize: 14,
+    color: "#6c757d",
+    marginBottom: 4,
+    fontFamily: "monospace" as const,
+  },
+  interfaceContainer: {
+    marginTop: 8,
+    paddingLeft: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: "#007bff",
+  },
+  interfaceHeader: {
+    fontSize: 14,
+    fontWeight: "bold" as const,
+    color: "#007bff",
+    marginBottom: 6,
+  },
+  interfaceItem: {
+    backgroundColor: "#e7f3ff",
+    padding: 8,
+    marginBottom: 4,
+    borderRadius: 4,
+  },
+  interfaceText: {
+    fontSize: 12,
+    color: "#495057",
+    fontFamily: "monospace" as const,
   },
 };

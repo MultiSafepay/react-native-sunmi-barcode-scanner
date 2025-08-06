@@ -68,7 +68,8 @@ class SunmiBarcodeScanner {
             "4608,1504",   // 0x1200,0x05E0 - Symbol scanner
             "9492,1529",   // 0x2514,0x05F9 - POS scanner  
             "34,12879",    // 0x0022,0x324F - SM-S100W
-            "193,12879"    // 0x00C1,0x324F - SM-S100W variant
+            "193,12879",   // 0x00C1,0x324F - SM-S100W variant
+            "16389,1529"   // 0x4005,0x05F9 - Datalogic 3450VSi (K2 Pro)
         )
     }
 
@@ -249,11 +250,60 @@ class SunmiBarcodeScanner {
                 "deviceSubclass" to device.deviceSubclass,
                 "deviceProtocol" to device.deviceProtocol,
                 "interfaceCount" to device.interfaceCount,
-                "isCompatible" to compatibleUsbScanners.contains("${device.productId},${device.vendorId}")
+                "isCompatible" to compatibleUsbScanners.contains("${device.productId},${device.vendorId}"),
+                "hasPermission" to usbManager.hasPermission(device),
+                "interfaces" to getDeviceInterfaces(device)
             ))
         }
         
         return devices
+    }
+
+    /**
+     * Get detailed interface information for a USB device
+     */
+    private fun getDeviceInterfaces(device: UsbDevice): List<Map<String, Any?>> {
+        val interfaces = mutableListOf<Map<String, Any?>>()
+        
+        for (i in 0 until device.interfaceCount) {
+            val usbInterface = device.getInterface(i)
+            interfaces.add(mapOf(
+                "id" to usbInterface.id,
+                "interfaceClass" to usbInterface.interfaceClass,
+                "interfaceSubclass" to usbInterface.interfaceSubclass,
+                "interfaceProtocol" to usbInterface.interfaceProtocol,
+                "endpointCount" to usbInterface.endpointCount,
+                "name" to (usbInterface.name ?: "")
+            ))
+        }
+        
+        return interfaces
+    }
+
+    /**
+     * Request USB permission for a specific device
+     * This might be needed for some scanner models like Datalogic
+     */
+    fun requestUsbPermission(context: Context, vendorId: Int, productId: Int): Boolean {
+        val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+        val deviceList = usbManager.deviceList
+        
+        for (device in deviceList.values) {
+            if (device.vendorId == vendorId && device.productId == productId) {
+                return if (usbManager.hasPermission(device)) {
+                    true // Already has permission
+                } else {
+                    // Request permission - this will show a system dialog
+                    val permissionIntent = android.app.PendingIntent.getBroadcast(
+                        context, 0, Intent("com.sunmi.scanner.USB_PERMISSION"), 
+                        if (android.os.Build.VERSION.SDK_INT >= 23) android.app.PendingIntent.FLAG_IMMUTABLE else 0
+                    )
+                    usbManager.requestPermission(device, permissionIntent)
+                    false // Permission requested, will be granted asynchronously
+                }
+            }
+        }
+        return false // Device not found
     }
 
     /**
@@ -303,13 +353,32 @@ class SunmiBarcodeScanner {
         for (device in deviceList.values) {
             val pidVidKey = "${device.productId},${device.vendorId}"
             if (compatibleUsbScanners.contains(pidVidKey)) {
+                
+                // Check if device has permission first
+                if (!usbManager.hasPermission(device)) {
+                    android.util.Log.w("SunmiBarcodeScanner", 
+                        "USB device ${device.deviceName} (VID: ${device.vendorId}, PID: ${device.productId}) lacks permission")
+                    continue
+                }
+                
+                // Enhanced intent with additional debugging information
                 val intent = Intent(ACTION_USB_DEVICE_SETTING).apply {
                     putExtra("name", device.deviceName ?: "")
                     putExtra("pid", device.productId)
                     putExtra("vid", device.vendorId)
                     putExtra("type", usbDataType)
                     putExtra("toast", toastEnabled)
+                    
+                    // Additional parameters that might help with Datalogic scanners
+                    putExtra("device_class", device.deviceClass)
+                    putExtra("device_subclass", device.deviceSubclass)
+                    putExtra("device_protocol", device.deviceProtocol)
+                    putExtra("interface_count", device.interfaceCount)
                 }
+                
+                android.util.Log.d("SunmiBarcodeScanner", 
+                    "Configuring USB scanner: ${device.deviceName} VID:${device.vendorId} PID:${device.productId} Type:$usbDataType Class:${device.deviceClass}")
+                
                 context.sendBroadcast(intent)
                 configuredCount++
             }
@@ -406,6 +475,57 @@ class SunmiBarcodeScanner {
         }
         
         setUsbScannerMode(context, usbType)
+    }
+
+    /**
+     * Test different USB data types for a specific scanner (troubleshooting method)
+     * This cycles through all possible data types to find what works for problematic scanners
+     */
+    fun testUsbScannerModes(context: Context, vendorId: Int, productId: Int) {
+        val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+        val deviceList = usbManager.deviceList
+        
+        for (device in deviceList.values) {
+            if (device.vendorId == vendorId && device.productId == productId) {
+                android.util.Log.i("SunmiBarcodeScanner", 
+                    "Testing USB modes for ${device.deviceName} (VID: $vendorId, PID: $productId)")
+                
+                // Test all possible modes with delays
+                val modes = listOf(
+                    0 to "KEYBOARD",
+                    1 to "KEYEVENT", 
+                    2 to "BROADCAST",
+                    3 to "ACCELERATION"
+                )
+                
+                for ((mode, modeName) in modes) {
+                    android.util.Log.d("SunmiBarcodeScanner", "Testing mode $mode ($modeName)")
+                    
+                    val intent = Intent(ACTION_USB_DEVICE_SETTING).apply {
+                        putExtra("name", device.deviceName ?: "")
+                        putExtra("pid", device.productId)
+                        putExtra("vid", device.vendorId)
+                        putExtra("type", mode)
+                        putExtra("toast", true) // Enable toast for testing
+                        
+                        // Datalogic-specific extras
+                        putExtra("device_class", device.deviceClass)
+                        putExtra("interface_count", device.interfaceCount)
+                        putExtra("force_config", true) // Force configuration
+                    }
+                    
+                    context.sendBroadcast(intent)
+                    
+                    // Small delay between configurations
+                    try {
+                        Thread.sleep(1000)
+                    } catch (e: InterruptedException) {
+                        break
+                    }
+                }
+                break
+            }
+        }
     }
 
     /**

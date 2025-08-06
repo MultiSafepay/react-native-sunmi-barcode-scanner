@@ -120,6 +120,15 @@ class ReactNativeSunmiBarcodeScannerModule : Module() {
       barcodeScanner.resetCompatibleUsbScanners()
     }
 
+    // USB Troubleshooting methods
+    Function("requestUsbPermission") { vendorId: Int, productId: Int ->
+      barcodeScanner.requestUsbPermission(context, vendorId, productId)
+    }
+
+    Function("testUsbScannerModes") { vendorId: Int, productId: Int ->
+      barcodeScanner.testUsbScannerModes(context, vendorId, productId)
+    }
+
     AsyncFunction("scanQRCode")  { promise: Promise ->
       barcodeScanner.scanQRCode(context, promise)
     }

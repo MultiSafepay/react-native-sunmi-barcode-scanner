@@ -33,6 +33,17 @@ export interface UsbDeviceInfo {
   deviceProtocol: number;
   interfaceCount: number;
   isCompatible: boolean;
+  hasPermission?: boolean;
+  interfaces?: UsbInterfaceInfo[];
+}
+
+export interface UsbInterfaceInfo {
+  id: number;
+  interfaceClass: number;
+  interfaceSubclass: number;
+  interfaceProtocol: number;
+  endpointCount: number;
+  name: string;
 }
 
 class PlatformNotSupportedError extends Error {
@@ -70,6 +81,8 @@ declare class ReactNativeSunmiBarcodeScannerModuleNative extends NativeModule<Re
   removeCompatibleUsbScanner(productId: number, vendorId: number): boolean;
   getCompatibleUsbScanners(): string[];
   resetCompatibleUsbScanners(): void;
+  requestUsbPermission(vendorId: number, productId: number): boolean;
+  testUsbScannerModes(vendorId: number, productId: number): void;
   scanQRCode: () => Promise<string>;
   cancelScan: () => Promise<void>;
 }
@@ -176,6 +189,16 @@ const ReactNativeSunmiBarcodeScannerModule = {
   resetCompatibleUsbScanners(): void {
     checkPlatform();
     nativeModule!.resetCompatibleUsbScanners();
+  },
+
+  requestUsbPermission(vendorId: number, productId: number): boolean {
+    checkPlatform();
+    return nativeModule!.requestUsbPermission(vendorId, productId);
+  },
+
+  testUsbScannerModes(vendorId: number, productId: number): void {
+    checkPlatform();
+    nativeModule!.testUsbScannerModes(vendorId, productId);
   },
 
   async scanQRCode(): Promise<string> {
