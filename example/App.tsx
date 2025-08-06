@@ -35,7 +35,7 @@ export default function App() {
       <ScrollView style={styles.container}>
         <Text style={styles.header}>Sunmi Barcode Scanner SDK</Text>
         <Text style={styles.status}>Current scanner mode: {currentMode}</Text>
-        <Group name="Set Scanner Mode">
+        {/* <Group name="Set Scanner Mode">
           <View style={styles.buttonRow}>
             <Button
               disabled={inProgress}
@@ -67,6 +67,68 @@ export default function App() {
                 );
                 setCurrentMode("ON_DEMAND");
                 Alert.alert("Scanner Mode", "Switched to On-Demand mode");
+              }}
+            />
+          </View>
+        </Group> */}
+        <Group name="Scanner Diagnostics">
+          <Text style={styles.groupHeader}>
+            Check scanner selection and priority:
+          </Text>
+          <View style={styles.buttonRow}>
+            <Button
+              disabled={inProgress}
+              title="Current Scanner"
+              onPress={() => {
+                try {
+                  const currentType =
+                    ReactNativeSunmiBarcodeScanner.getCurrentScannerType();
+                  Alert.alert("Current Scanner", `Active: ${currentType}`);
+                } catch (error) {
+                  Alert.alert("Error", (error as Error).message);
+                }
+              }}
+            />
+            <Button
+              disabled={inProgress}
+              title="Optimal Scanner"
+              onPress={() => {
+                try {
+                  const optimalType =
+                    ReactNativeSunmiBarcodeScanner.getOptimalScannerType();
+                  Alert.alert(
+                    "Optimal Scanner",
+                    `Would select: ${optimalType}\n\nThis shows which scanner would be chosen based on current priority settings.`
+                  );
+                } catch (error) {
+                  Alert.alert("Error", (error as Error).message);
+                }
+              }}
+            />
+          </View>
+          <View style={styles.buttonRow}>
+            <Button
+              disabled={inProgress}
+              title="Compare Scanner Types"
+              onPress={() => {
+                try {
+                  const currentType =
+                    ReactNativeSunmiBarcodeScanner.getCurrentScannerType();
+                  const optimalType =
+                    ReactNativeSunmiBarcodeScanner.getOptimalScannerType();
+                  const priority =
+                    ReactNativeSunmiBarcodeScanner.getScannerPriority();
+
+                  const match =
+                    currentType === optimalType ? "✓ Match" : "⚠️ Different";
+
+                  Alert.alert(
+                    "Scanner Comparison",
+                    `Priority: ${priority}\n\nCurrently Active: ${currentType}\nWould Select: ${optimalType}\n\nStatus: ${match}${currentType !== optimalType ? "\n\n💡 Consider re-initializing the scanner if you want to use the optimal selection." : ""}`
+                  );
+                } catch (error) {
+                  Alert.alert("Error", (error as Error).message);
+                }
               }}
             />
           </View>
@@ -270,7 +332,8 @@ const styles = {
   },
   buttonRow: {
     flexDirection: "row" as const,
-    justifyContent: "space-around" as const,
+    justifyContent: "center" as const,
     gap: 10,
+    paddingVertical: 5,
   },
 };

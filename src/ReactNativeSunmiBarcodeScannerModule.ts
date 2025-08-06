@@ -58,6 +58,7 @@ declare class ReactNativeSunmiBarcodeScannerModuleNative extends NativeModule<Re
   getScannerPriority(): ScannerPriority;
   getAvailableScanners(): Promise<ScannerInfo[]>;
   getCurrentScannerType(): ScannerType;
+  getOptimalScannerType(): ScannerType;
   setScanTimeout(timeout: number): void;
   setBeep(enabled: boolean): void;
   setToast(enabled: boolean): void;
@@ -115,6 +116,11 @@ const ReactNativeSunmiBarcodeScannerModule = {
   getCurrentScannerType(): ScannerType {
     checkPlatform();
     return nativeModule!.getCurrentScannerType();
+  },
+
+  getOptimalScannerType(): ScannerType {
+    checkPlatform();
+    return nativeModule!.getOptimalScannerType();
   },
 
   setScanTimeout(timeout: number): void {

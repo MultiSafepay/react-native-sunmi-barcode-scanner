@@ -1,11 +1,9 @@
 package expo.modules.sunmibarcodescanner
 
 import android.app.Activity
-import android.view.KeyEvent
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.Promise
-import java.net.URL
 
 class ReactNativeSunmiBarcodeScannerModule : Module() {
 
@@ -20,17 +18,6 @@ class ReactNativeSunmiBarcodeScannerModule : Module() {
     // Can be inferred from module's class name, but it's recommended to set it explicitly for clarity.
     // The module will be accessible from `requireNativeModule('ReactNativeSunmiBarcodeScanner')` in JavaScript.
     Name("ReactNativeSunmiBarcodeScanner")
-
-    // Enables the module to be used as a native view. Definition components that are accepted as part of
-    // the view definition: Prop, Events.
-    View(ReactNativeSunmiBarcodeScannerView::class) {
-      // Defines a setter for the `url` prop.
-      Prop("url") { view: ReactNativeSunmiBarcodeScannerView, url: URL ->
-        view.webView.loadUrl(url.toString())
-      }
-      // Defines an event that the view can send to JavaScript.
-      Events("onLoad")
-    }
 
     // ----------------------------------------
     // Sunmi Barcode Scanner SDK public methods
@@ -78,6 +65,10 @@ class ReactNativeSunmiBarcodeScannerModule : Module() {
 
     Function("getCurrentScannerType") {
       return@Function barcodeScanner.getCurrentScannerType().typeName
+    }
+
+    Function("getOptimalScannerType") {
+      return@Function barcodeScanner.getOptimalScannerType(context).typeName
     }
 
     Function("setScanTimeout") { timeout: Long ->

@@ -62,12 +62,6 @@ class SunmiBarcodeScanner {
         private const val ACTION_USB_DEVICE_SETTING = "com.sunmi.scanner.ACTION_BAR_DEVICES_SETTING"
         private const val DATA_KEY = "data"
         
-        // Serial command constants (from Sunmi's official docs)
-        private const val PREFIX_HEX = "7E0130303030" // ~<SOH>0000
-        private const val SUFFIX_HEX = "3B03" // ;<ETX>
-        private const val STORAGE_TEMP_HEX = "23" // # temporary setting
-        private const val STORAGE_EVER_HEX = "40" // @ permanent setting
-        
         // Default USB scanner VID/PID combinations from Sunmi's official documentation
         // These can be extended dynamically via addCompatibleUsbScanner API
         private val DEFAULT_USB_SCANNER_IDENTIFIERS = listOf(
@@ -91,9 +85,6 @@ class SunmiBarcodeScanner {
     private var isReceiverRegistered = false
     private var context: Context? = null
     private var isInitialized = false
-    
-    // USB scanner properties
-    private var usbDevices: List<UsbDevice> = emptyList()
     
     // Dynamic list of compatible USB scanner identifiers
     private val compatibleUsbScanners = mutableListOf<String>().apply {
@@ -481,6 +472,14 @@ class SunmiBarcodeScanner {
     }
 
     /**
+     * Get the optimal scanner type that would be selected based on current priority and availability
+     * This is useful for debugging and understanding which scanner will be used without initializing
+     */
+    fun getOptimalScannerType(context: Context): ScannerType {
+        return selectOptimalScanner(context)
+    }
+
+    /**
      * Detect USB scanners by checking VID/PID against compatible scanners list
      * Following the same approach as SunmiScanner.java - dynamic detection
      */
@@ -740,6 +739,5 @@ class SunmiBarcodeScanner {
         // Reset state
         isInitialized = false
         activeScannerType = ScannerType.NONE
-        usbDevices = emptyList()
     }
 }
