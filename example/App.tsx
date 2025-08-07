@@ -23,6 +23,10 @@ export default function App() {
     "ON_DEMAND"
   );
 
+  // State for scanner type and priority
+  const [currentScannerType, setCurrentScannerType] = useState<string>("NONE");
+  const [currentPriority, setCurrentPriority] = useState<string>("PREFER_USB");
+
   // State for VID/PID input dialog
   const [showVidPidDialog, setShowVidPidDialog] = useState(false);
   const [vidInput, setVidInput] = useState("");
@@ -31,6 +35,9 @@ export default function App() {
   // State for USB device interfaces
   const [usbDevices, setUsbDevices] = useState<any[]>([]);
   const [showInterfaces, setShowInterfaces] = useState(false);
+
+  // State for available scanners
+  const [availableScanners, setAvailableScanners] = useState<any[]>([]);
 
   const handleAddScanner = () => {
     try {
@@ -92,6 +99,79 @@ export default function App() {
     }
   };
 
+  const loadAvailableScanners = async () => {
+    try {
+      const scanners =
+        await ReactNativeSunmiBarcodeScanner.getAvailableScanners();
+      setAvailableScanners(scanners);
+
+      // Show results in alert for immediate feedback
+      const scannerInfo = scanners
+        .map(
+          (scanner: any) =>
+            `Type: ${scanner.type}\n` +
+            `Connected: ${scanner.isConnected ? "Yes" : "No"}\n` +
+            `Device: ${scanner.deviceName || "N/A"}\n` +
+            (scanner.vid && scanner.pid
+              ? `VID/PID: 0x${scanner.vid.toString(16).toUpperCase()}/0x${scanner.pid.toString(16).toUpperCase()}`
+              : "VID/PID: N/A")
+        )
+        .join("\n\n");
+
+      Alert.alert("Available Scanners", scannerInfo || "No scanners found");
+    } catch (error) {
+      Alert.alert(
+        "Error",
+        "Failed to get available scanners: " + (error as Error).message
+      );
+    }
+  };
+
+  const refreshScannerStatus = () => {
+    try {
+      const scannerType =
+        ReactNativeSunmiBarcodeScanner.getCurrentScannerType();
+      const priority = ReactNativeSunmiBarcodeScanner.getScannerPriority();
+
+      setCurrentScannerType(scannerType);
+      setCurrentPriority(priority);
+    } catch (error) {
+      console.error("Failed to refresh scanner status:", error);
+    }
+  };
+
+  const setUsbMode = async (device: any, mode: number, modeName: string) => {
+    try {
+      const result =
+        await ReactNativeSunmiBarcodeScanner.setSpecificUsbScannerMode(
+          device.vendorId,
+          device.productId,
+          mode
+        );
+
+      if (result.success) {
+        Alert.alert(
+          "USB Mode Set",
+          `Device: ${result.deviceName}\n` +
+            `Mode: ${result.modeDescription}\n` +
+            `${result.message}`
+        );
+      } else {
+        if (result.error?.includes("Permission request sent")) {
+          Alert.alert(
+            "USB Permission Required",
+            result.error +
+              "\n\nAfter granting permission, tap 'Refresh USB Devices' to update the device list, then try setting the mode again."
+          );
+        } else {
+          Alert.alert("Failed to Set Mode", result.error || "Unknown error");
+        }
+      }
+    } catch (error) {
+      Alert.alert("Error", `Failed to set USB mode: ${error}`);
+    }
+  };
+
   useEffect(() => {
     ReactNativeSunmiBarcodeScanner.addCompatibleUsbScanner(16389, 1529); // Datalogic 3450VSi
 
@@ -101,6 +181,9 @@ export default function App() {
     // Get current mode
     const mode = ReactNativeSunmiBarcodeScanner.getScannerOperationMode();
     setCurrentMode(mode);
+
+    // Get initial scanner status
+    refreshScannerStatus();
   }, []);
 
   return (
@@ -110,8 +193,9 @@ export default function App() {
         <View>
           <Text style={styles.status}>Current scanner mode: {currentMode}</Text>
           <Text style={styles.status}>
-            {`Current scanner: ${ReactNativeSunmiBarcodeScanner.getCurrentScannerType()}`}
+            Current scanner: {currentScannerType}
           </Text>
+          <Text style={styles.status}>Scanner priority: {currentPriority}</Text>
         </View>
         {/* <Group name="Set Scanner Mode">
           <View style={styles.buttonRow}>
@@ -156,12 +240,14 @@ export default function App() {
           <View style={styles.buttonRow}>
             <Button
               disabled={inProgress}
-              title="Current Scanner"
+              title="Refresh Scanner Status"
               onPress={() => {
                 try {
-                  const currentType =
-                    ReactNativeSunmiBarcodeScanner.getCurrentScannerType();
-                  Alert.alert("Current Scanner", `Active: ${currentType}`);
+                  refreshScannerStatus();
+                  Alert.alert(
+                    "Scanner Status",
+                    `Active Scanner: ${currentScannerType}\nPriority: ${currentPriority}\nMode: ${currentMode}`
+                  );
                 } catch (error) {
                   Alert.alert("Error", (error as Error).message);
                 }
@@ -190,6 +276,9 @@ export default function App() {
               title="Compare Scanner Types"
               onPress={() => {
                 try {
+                  // Refresh status to get latest values
+                  refreshScannerStatus();
+
                   const currentType =
                     ReactNativeSunmiBarcodeScanner.getCurrentScannerType();
                   const optimalType =
@@ -203,6 +292,80 @@ export default function App() {
                   Alert.alert(
                     "Scanner Comparison",
                     `Priority: ${priority}\n\nCurrently Active: ${currentType}\nWould Select: ${optimalType}\n\nStatus: ${match}${currentType !== optimalType ? "\n\n💡 Consider re-initializing the scanner if you want to use the optimal selection." : ""}`
+                  );
+                } catch (error) {
+                  Alert.alert("Error", (error as Error).message);
+                }
+              }}
+            />
+
+            <Button
+              disabled={inProgress}
+              title="Update Scanner Priority"
+              onPress={() => {
+                try {
+                  // Show priority selection dialog
+                  Alert.alert(
+                    "Select Scanner Priority",
+                    "Choose your preferred scanner priority:",
+                    [
+                      {
+                        text: "Prefer USB",
+                        onPress: () => {
+                          ReactNativeSunmiBarcodeScanner.setScannerPriority(
+                            "PREFER_USB"
+                          );
+                          refreshScannerStatus();
+                          Alert.alert(
+                            "Priority Updated",
+                            "Scanner priority set to PREFER_USB"
+                          );
+                        },
+                      },
+                      {
+                        text: "Prefer Serial",
+                        onPress: () => {
+                          ReactNativeSunmiBarcodeScanner.setScannerPriority(
+                            "PREFER_SERIAL"
+                          );
+                          refreshScannerStatus();
+                          Alert.alert(
+                            "Priority Updated",
+                            "Scanner priority set to PREFER_SERIAL"
+                          );
+                        },
+                      },
+                      {
+                        text: "USB Only",
+                        onPress: () => {
+                          ReactNativeSunmiBarcodeScanner.setScannerPriority(
+                            "USB_ONLY"
+                          );
+                          refreshScannerStatus();
+                          Alert.alert(
+                            "Priority Updated",
+                            "Scanner priority set to USB_ONLY"
+                          );
+                        },
+                      },
+                      {
+                        text: "Serial Only",
+                        onPress: () => {
+                          ReactNativeSunmiBarcodeScanner.setScannerPriority(
+                            "SERIAL_ONLY"
+                          );
+                          refreshScannerStatus();
+                          Alert.alert(
+                            "Priority Updated",
+                            "Scanner priority set to SERIAL_ONLY"
+                          );
+                        },
+                      },
+                      {
+                        text: "Cancel",
+                        style: "cancel",
+                      },
+                    ]
                   );
                 } catch (error) {
                   Alert.alert("Error", (error as Error).message);
@@ -316,7 +479,11 @@ export default function App() {
             />
           </View>
           {showInterfaces && usbDevices.length > 0 && (
-            <ScrollView style={styles.interfaceList}>
+            <ScrollView
+              horizontal
+              style={styles.interfaceList}
+              showsHorizontalScrollIndicator={false}
+            >
               {usbDevices.map((device, index) => (
                 <View key={index} style={styles.deviceInfo}>
                   <Text style={styles.deviceHeader}>
@@ -408,6 +575,185 @@ export default function App() {
             </ScrollView>
           )}
         </Group>
+
+        <Group name="USB Mode Testing">
+          <Text style={styles.instructions}>
+            Test different USB modes for connected scanners. The system will
+            automatically recommend the best mode based on device capabilities.
+          </Text>
+          {usbDevices.length > 0 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {usbDevices.map((device, index) => (
+                <View key={index} style={styles.deviceTestCard}>
+                  <Text style={styles.deviceHeader}>
+                    🔧 {device.deviceName || "Unknown Device"}
+                  </Text>
+                  <Text style={styles.deviceDetail}>
+                    VID: {device.vendorId} | PID: {device.productId}
+                  </Text>
+                  {device.hasHidInterface && (
+                    <Text style={styles.hidIndicator}>✅ HID Interface</Text>
+                  )}
+                  {device.hasCdcInterface && (
+                    <Text style={styles.cdcIndicator}>✅ CDC Interface</Text>
+                  )}
+                  <Text style={styles.capabilityText}>
+                    {device.capabilities || "Unknown capabilities"}
+                  </Text>
+
+                  {!device.hasPermission && (
+                    <View style={styles.permissionWarning}>
+                      <Text style={styles.permissionText}>
+                        ⚠️ USB Permission Required
+                      </Text>
+                      <Button
+                        title="Request Permission"
+                        onPress={async () => {
+                          try {
+                            const success =
+                              await ReactNativeSunmiBarcodeScanner.requestUsbPermission(
+                                device.vendorId,
+                                device.productId
+                              );
+                            if (success) {
+                              Alert.alert(
+                                "Permission Granted",
+                                "USB permission already granted for this device."
+                              );
+                              // Refresh device list to update permission status
+                              loadUsbDevices();
+                            } else {
+                              Alert.alert(
+                                "Permission Requested",
+                                "Please accept the USB permission dialog when prompted, then try testing modes again."
+                              );
+                            }
+                          } catch (error) {
+                            Alert.alert(
+                              "Error",
+                              `Failed to request USB permission: ${error}`
+                            );
+                          }
+                        }}
+                      />
+                    </View>
+                  )}
+
+                  <Button
+                    disabled={!device.hasPermission}
+                    title="Test USB Modes"
+                    onPress={async () => {
+                      try {
+                        const result =
+                          await ReactNativeSunmiBarcodeScanner.testUsbScannerModes(
+                            device.vendorId,
+                            device.productId
+                          );
+
+                        if (result.success) {
+                          Alert.alert(
+                            "USB Mode Test Results",
+                            `Device: ${result.deviceName}\n` +
+                              `Capabilities: ${result.capabilities}\n` +
+                              `HID Interface: ${result.hasHidInterface ? "Yes" : "No"}\n` +
+                              `CDC Interface: ${result.hasCdcInterface ? "Yes" : "No"}\n\n` +
+                              `Recommendation: ${result.recommendation}\n\n` +
+                              `Test Results:\n` +
+                              result.testResults
+                                ?.map(
+                                  (test) =>
+                                    `${test.description}: ${test.sent ? "Sent" : "Failed"}`
+                                )
+                                .join("\n")
+                          );
+                        } else {
+                          if (
+                            result.error?.includes("Permission request sent")
+                          ) {
+                            Alert.alert(
+                              "USB Permission Required",
+                              result.error +
+                                "\n\nAfter granting permission, tap 'Refresh USB Devices' to update the device list, then try again."
+                            );
+                          } else {
+                            Alert.alert(
+                              "Test Failed",
+                              result.error || "Unknown error"
+                            );
+                          }
+                        }
+                      } catch (error) {
+                        Alert.alert(
+                          "Error",
+                          `Failed to test USB modes: ${error}`
+                        );
+                      }
+                    }}
+                  />
+
+                  <View style={styles.modeButtonContainer}>
+                    <Button
+                      disabled={!device.hasPermission}
+                      title="Set KEYBOARD"
+                      onPress={() => setUsbMode(device, 0, "KEYBOARD")}
+                    />
+                    <Button
+                      disabled={!device.hasPermission}
+                      title="Set USB_COM"
+                      onPress={() => setUsbMode(device, 1, "USB_COM")}
+                    />
+                    <Button
+                      disabled={!device.hasPermission}
+                      title="Set BROADCAST"
+                      onPress={() => setUsbMode(device, 2, "BROADCAST")}
+                    />
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+          {usbDevices.length === 0 && (
+            <Text style={styles.noDevicesText}>
+              No USB devices detected. Connect a USB scanner to test modes.
+            </Text>
+          )}
+        </Group>
+
+        <Group name="Available Scanners">
+          <Text style={styles.groupHeader}>
+            List all connected and available scanners (USB and Serial)
+          </Text>
+          <Button
+            title="Get Available Scanners"
+            onPress={loadAvailableScanners}
+          />
+          {availableScanners.length > 0 && (
+            <View style={{ marginTop: 10 }}>
+              <Text style={styles.sectionTitle}>Scanner List:</Text>
+              {availableScanners.map((scanner: any, index: number) => (
+                <View key={index} style={styles.scannerItem}>
+                  <Text style={styles.scannerType}>
+                    📱 {scanner.type} Scanner
+                  </Text>
+                  <Text style={styles.scannerDetail}>
+                    Status:{" "}
+                    {scanner.isConnected ? "🟢 Connected" : "🔴 Disconnected"}
+                  </Text>
+                  <Text style={styles.scannerDetail}>
+                    Device: {scanner.deviceName || "N/A"}
+                  </Text>
+                  {scanner.vid && scanner.pid && (
+                    <Text style={styles.scannerDetail}>
+                      VID/PID: 0x{scanner.vid.toString(16).toUpperCase()}/0x
+                      {scanner.pid.toString(16).toUpperCase()}
+                    </Text>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
+        </Group>
+
         <Group name="Scanner API">
           <Button
             disabled={inProgress || !isInitialized}
@@ -526,6 +872,7 @@ const styles = {
     flex: 1,
     backgroundColor: "#eee",
     paddingVertical: 20,
+    marginBottom: 20,
   },
   view: {
     flex: 1,
@@ -592,6 +939,7 @@ const styles = {
     marginBottom: 10,
     borderWidth: 1,
     borderColor: "#e9ecef",
+    marginRight: 10,
   },
   deviceHeader: {
     fontSize: 16,
@@ -607,7 +955,7 @@ const styles = {
   },
   interfaceContainer: {
     marginTop: 8,
-    paddingLeft: 10,
+    marginLeft: 10,
     borderLeftWidth: 2,
     borderLeftColor: "#007bff",
   },
@@ -627,5 +975,91 @@ const styles = {
     fontSize: 12,
     color: "#495057",
     fontFamily: "monospace" as const,
+  },
+  instructions: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 15,
+    textAlign: "center" as const,
+  },
+  deviceTestCard: {
+    backgroundColor: "#f8f9fa",
+    borderRadius: 10,
+    padding: 15,
+    marginRight: 10,
+    minWidth: 200,
+    borderWidth: 1,
+    borderColor: "#e9ecef",
+  },
+  hidIndicator: {
+    fontSize: 12,
+    color: "#28a745",
+    fontWeight: "bold" as const,
+    marginBottom: 2,
+  },
+  cdcIndicator: {
+    fontSize: 12,
+    color: "#17a2b8",
+    fontWeight: "bold" as const,
+    marginBottom: 2,
+  },
+  capabilityText: {
+    fontSize: 12,
+    color: "#6c757d",
+    fontStyle: "italic" as const,
+    marginBottom: 10,
+  },
+  modeButtonContainer: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    marginTop: 10,
+    gap: 5,
+  },
+  noDevicesText: {
+    fontSize: 14,
+    color: "#999",
+    textAlign: "center" as const,
+    fontStyle: "italic" as const,
+    padding: 20,
+  },
+  permissionWarning: {
+    backgroundColor: "#fff3cd",
+    borderRadius: 6,
+    padding: 10,
+    marginVertical: 8,
+    borderWidth: 1,
+    borderColor: "#ffeaa7",
+  },
+  permissionText: {
+    fontSize: 12,
+    color: "#856404",
+    fontWeight: "bold" as const,
+    textAlign: "center" as const,
+    marginBottom: 8,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "bold" as const,
+    marginBottom: 10,
+    color: "#333",
+  },
+  scannerItem: {
+    backgroundColor: "#f8f9fa",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#e9ecef",
+  },
+  scannerType: {
+    fontSize: 16,
+    fontWeight: "bold" as const,
+    color: "#007bff",
+    marginBottom: 4,
+  },
+  scannerDetail: {
+    fontSize: 14,
+    color: "#6c757d",
+    marginBottom: 2,
   },
 };

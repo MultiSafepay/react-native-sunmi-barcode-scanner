@@ -46,6 +46,33 @@ export interface UsbInterfaceInfo {
   name: string;
 }
 
+export interface TestModeResult {
+  mode: number;
+  description: string;
+  sent: boolean;
+  status: string;
+}
+
+export interface TestUsbModesResult {
+  success: boolean;
+  deviceName?: string;
+  capabilities?: string;
+  hasHidInterface?: boolean;
+  hasCdcInterface?: boolean;
+  testResults?: TestModeResult[];
+  recommendation?: string;
+  error?: string;
+}
+
+export interface SetUsbModeResult {
+  success: boolean;
+  deviceName?: string;
+  mode?: number;
+  modeDescription?: string;
+  message?: string;
+  error?: string;
+}
+
 class PlatformNotSupportedError extends Error {
   constructor() {
     super(
@@ -82,7 +109,16 @@ declare class ReactNativeSunmiBarcodeScannerModuleNative extends NativeModule<Re
   getCompatibleUsbScanners(): string[];
   resetCompatibleUsbScanners(): void;
   requestUsbPermission(vendorId: number, productId: number): boolean;
-  testUsbScannerModes(vendorId: number, productId: number): void;
+  getDeviceModeConfigurations(): Record<string, number>;
+  testUsbScannerModes(
+    vendorId: number,
+    productId: number
+  ): Promise<TestUsbModesResult>;
+  setSpecificUsbScannerMode(
+    vendorId: number,
+    productId: number,
+    mode: number
+  ): Promise<SetUsbModeResult>;
   scanQRCode: () => Promise<string>;
   cancelScan: () => Promise<void>;
 }
@@ -196,9 +232,26 @@ const ReactNativeSunmiBarcodeScannerModule = {
     return nativeModule!.requestUsbPermission(vendorId, productId);
   },
 
-  testUsbScannerModes(vendorId: number, productId: number): void {
+  getDeviceModeConfigurations(): Record<string, number> {
     checkPlatform();
-    nativeModule!.testUsbScannerModes(vendorId, productId);
+    return nativeModule!.getDeviceModeConfigurations();
+  },
+
+  async testUsbScannerModes(
+    vendorId: number,
+    productId: number
+  ): Promise<TestUsbModesResult> {
+    checkPlatform();
+    return nativeModule!.testUsbScannerModes(vendorId, productId);
+  },
+
+  async setSpecificUsbScannerMode(
+    vendorId: number,
+    productId: number,
+    mode: number
+  ): Promise<SetUsbModeResult> {
+    checkPlatform();
+    return nativeModule!.setSpecificUsbScannerMode(vendorId, productId, mode);
   },
 
   async scanQRCode(): Promise<string> {

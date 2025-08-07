@@ -11,6 +11,9 @@ import android.os.Handler
 import android.os.Looper
 import kotlinx.coroutines.*
 import expo.modules.kotlin.Promise
+import expo.modules.kotlin.records.Record
+import expo.modules.kotlin.records.Field
+import expo.modules.kotlin.types.Enumerable
 
 enum class SunmiBarcodeScannerException(val code: String) {
     COOLDOWN_ACTIVE("COOLDOWN_ACTIVE"),
@@ -51,6 +54,67 @@ data class ScannerInfo(
     val vid: Int?
 )
 
+// Expo Record classes for return types
+class TestModeResult : Record {
+    @Field
+    var mode: Int = 0
+    
+    @Field
+    var description: String = ""
+    
+    @Field
+    var sent: Boolean = false
+    
+    @Field
+    var status: String = ""
+}
+
+class TestUsbModesResult : Record {
+    @Field
+    var success: Boolean = false
+    
+    @Field
+    var deviceName: String? = null
+    
+    @Field
+    var capabilities: String? = null
+    
+    @Field
+    var hasHidInterface: Boolean? = null
+    
+    @Field
+    var hasCdcInterface: Boolean? = null
+    
+    @Field
+    var testResults: List<TestModeResult>? = null
+    
+    @Field
+    var recommendation: String? = null
+    
+    @Field
+    var error: String? = null
+}
+
+class SetUsbModeResult : Record {
+    @Field
+    var success: Boolean = false
+    
+    @Field
+    var deviceName: String? = null
+    
+    @Field
+    var mode: Int? = null
+    
+    @Field
+    var modeDescription: String? = null
+    
+    @Field
+    var message: String? = null
+    
+    @Field
+    var error: String? = null
+}
+
 class SunmiBarcodeScanner {
     
     companion object {
@@ -69,7 +133,8 @@ class SunmiBarcodeScanner {
             "9492,1529",   // 0x2514,0x05F9 - POS scanner  
             "34,12879",    // 0x0022,0x324F - SM-S100W
             "193,12879",   // 0x00C1,0x324F - SM-S100W variant
-            "16389,1529"   // 0x4005,0x05F9 - Datalogic 3450VSi (K2 Pro)
+            "16389,1529",  // 0x4005,0x05F9 - Datalogic 3450VSi (K2 Pro)
+            "21590,6790"   // 0x4005,0x1A7E - NETUM NT-1228U
         )
     }
 
@@ -92,6 +157,9 @@ class SunmiBarcodeScanner {
     private val compatibleUsbScanners = mutableListOf<String>().apply {
         addAll(DEFAULT_USB_SCANNER_IDENTIFIERS)
     }
+    
+    // Track individual USB device configurations (VID:PID -> mode)
+    private val deviceModeConfigurations = mutableMapOf<String, Int>()
 
     @OptIn(DelicateCoroutinesApi::class)
     fun scanQRCode(context: Context, promise: Promise) {
@@ -144,6 +212,12 @@ class SunmiBarcodeScanner {
             promise.rejectWithSunmiError(SunmiBarcodeScannerException.USB_DISCONNECTED, "USB scanner disconnected")
             return
         }
+        
+        // Apply current USB configuration before scanning
+        // This ensures any mode changes from the demo app are applied
+        android.util.Log.d("SunmiBarcodeScanner", 
+            "Applying current USB configuration (mode: $currentUsbDataType) before scanning")
+        configureUsbScannersWithType(context, currentUsbDataType)
         
         // USB scanners use default timeout
         val effectiveTimeout = scanTimeout
@@ -252,7 +326,10 @@ class SunmiBarcodeScanner {
                 "interfaceCount" to device.interfaceCount,
                 "isCompatible" to compatibleUsbScanners.contains("${device.productId},${device.vendorId}"),
                 "hasPermission" to usbManager.hasPermission(device),
-                "interfaces" to getDeviceInterfaces(device)
+                "interfaces" to getDeviceInterfaces(device),
+                "hasHidInterface" to hasHidInterface(device),
+                "hasCdcInterface" to hasCdcInterface(device),
+                "capabilities" to analyzeUsbDeviceCapabilities(device)
             ))
         }
         
@@ -281,8 +358,54 @@ class SunmiBarcodeScanner {
     }
 
     /**
-     * Request USB permission for a specific device
+     * Check if a USB device has HID (Human Interface Device) capability
+     * Interface class 3 = HID, typically used for keyboards, mice, scanners
+     */
+    private fun hasHidInterface(device: UsbDevice): Boolean {
+        for (i in 0 until device.interfaceCount) {
+            val usbInterface = device.getInterface(i)
+            if (usbInterface.interfaceClass == 3) { // USB_CLASS_HID
+                return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * Check if a USB device has CDC (Communication Device Class) capability
+     * Interface class 2 = CDC, typically used for serial/COM communication
+     */
+    private fun hasCdcInterface(device: UsbDevice): Boolean {
+        for (i in 0 until device.interfaceCount) {
+            val usbInterface = device.getInterface(i)
+            if (usbInterface.interfaceClass == 2) { // USB_CLASS_COMM
+                return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * Analyze USB device capabilities and determine optimal configuration mode
+     */
+    private fun analyzeUsbDeviceCapabilities(device: UsbDevice): String {
+        val hasHid = hasHidInterface(device)
+        val hasCdc = hasCdcInterface(device)
+        val isComposite = device.deviceClass == 239 // USB_CLASS_MISC (composite)
+        
+        return when {
+            hasHid && hasCdc -> "HID_CDC_COMPOSITE"
+            hasHid -> "HID_KEYBOARD"
+            hasCdc -> "CDC_SERIAL"
+            isComposite -> "COMPOSITE_UNKNOWN"
+            else -> "UNKNOWN"
+        }
+    }
+
+    /**
+     * Request USB permission for a specific device (Public API)
      * This might be needed for some scanner models like Datalogic
+     * Returns: true if permission already granted, false if permission requested (async)
      */
     fun requestUsbPermission(context: Context, vendorId: Int, productId: Int): Boolean {
         val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
@@ -361,30 +484,67 @@ class SunmiBarcodeScanner {
                     continue
                 }
                 
-                // Enhanced intent with additional debugging information
-                val intent = Intent(ACTION_USB_DEVICE_SETTING).apply {
-                    putExtra("name", device.deviceName ?: "")
-                    putExtra("pid", device.productId)
-                    putExtra("vid", device.vendorId)
-                    putExtra("type", usbDataType)
-                    putExtra("toast", toastEnabled)
-                    
-                    // Additional parameters that might help with Datalogic scanners
-                    putExtra("device_class", device.deviceClass)
-                    putExtra("device_subclass", device.deviceSubclass)
-                    putExtra("device_protocol", device.deviceProtocol)
-                    putExtra("interface_count", device.interfaceCount)
+                // Use smart configuration based on device capabilities
+                val configuredSuccessfully = configureUsbScannerSmart(context, device, usbDataType)
+                if (configuredSuccessfully) {
+                    configuredCount++
                 }
-                
-                android.util.Log.d("SunmiBarcodeScanner", 
-                    "Configuring USB scanner: ${device.deviceName} VID:${device.vendorId} PID:${device.productId} Type:$usbDataType Class:${device.deviceClass}")
-                
-                context.sendBroadcast(intent)
-                configuredCount++
             }
         }
         
         return configuredCount
+    }
+
+    /**
+     * Smart USB scanner configuration based on device capabilities
+     * Automatically selects the best configuration mode for each device type
+     */
+    private fun configureUsbScannerSmart(context: Context, device: UsbDevice, requestedDataType: Int): Boolean {
+        val capabilities = analyzeUsbDeviceCapabilities(device)
+        val hasHid = hasHidInterface(device)
+        val hasCdc = hasCdcInterface(device)
+        
+        // Determine optimal data type based on device capabilities and requested type
+        val optimalDataType = when {
+            // For devices with HID interface, prefer KEYBOARD mode (0) for better compatibility
+            hasHid && (requestedDataType == 2) -> {
+                android.util.Log.i("SunmiBarcodeScanner", 
+                    "Device ${device.deviceName} has HID interface, switching from BROADCAST to KEYBOARD mode for better compatibility")
+                0 // KEYBOARD mode
+            }
+            // For composite devices like Datalogic 3450VSi, try KEYBOARD first
+            capabilities == "HID_CDC_COMPOSITE" && (requestedDataType == 2) -> {
+                android.util.Log.i("SunmiBarcodeScanner", 
+                    "Composite device ${device.deviceName} detected, trying KEYBOARD mode first")
+                0 // KEYBOARD mode
+            }
+            // Use requested type for other cases
+            else -> requestedDataType
+        }
+        
+        val intent = Intent(ACTION_USB_DEVICE_SETTING).apply {
+            putExtra("name", device.deviceName ?: "")
+            putExtra("pid", device.productId)
+            putExtra("vid", device.vendorId)
+            putExtra("type", optimalDataType)
+            putExtra("toast", toastEnabled)
+            
+            // Enhanced parameters for better device support
+            putExtra("device_class", device.deviceClass)
+            putExtra("device_subclass", device.deviceSubclass)
+            putExtra("device_protocol", device.deviceProtocol)
+            putExtra("interface_count", device.interfaceCount)
+            putExtra("has_hid", hasHid)
+            putExtra("has_cdc", hasCdc)
+            putExtra("capabilities", capabilities)
+        }
+        
+        android.util.Log.d("SunmiBarcodeScanner", 
+            "Configuring USB scanner: ${device.deviceName} VID:${device.vendorId} PID:${device.productId} " +
+            "Type:$optimalDataType (requested:$requestedDataType) Capabilities:$capabilities")
+        
+        context.sendBroadcast(intent)
+        return true
     }
 
     /**
@@ -462,6 +622,14 @@ class SunmiBarcodeScanner {
     }
 
     /**
+     * Get current device-specific USB mode configurations
+     * Returns a map of device keys (VID:PID) to their configured modes
+     */
+    fun getDeviceModeConfigurations(): Map<String, Int> {
+        return deviceModeConfigurations.toMap()
+    }
+
+    /**
      * Set USB scanner data type with string values for easier API usage
      * Extends setUsbScannerMode with string-based configuration
      */
@@ -478,53 +646,211 @@ class SunmiBarcodeScanner {
     }
 
     /**
-     * Test different USB data types for a specific scanner (troubleshooting method)
-     * This cycles through all possible data types to find what works for problematic scanners
+     * Test different USB scanner modes to find the most compatible one
+     * Useful for troubleshooting problematic USB scanners
      */
-    fun testUsbScannerModes(context: Context, vendorId: Int, productId: Int) {
-        val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
-        val deviceList = usbManager.deviceList
-        
-        for (device in deviceList.values) {
-            if (device.vendorId == vendorId && device.productId == productId) {
-                android.util.Log.i("SunmiBarcodeScanner", 
-                    "Testing USB modes for ${device.deviceName} (VID: $vendorId, PID: $productId)")
-                
-                // Test all possible modes with delays
-                val modes = listOf(
-                    0 to "KEYBOARD",
-                    1 to "KEYEVENT", 
-                    2 to "BROADCAST",
-                    3 to "ACCELERATION"
+    fun testUsbScannerModes(
+        context: Context, 
+        vendorId: Int, 
+        productId: Int,
+        promise: Promise
+    ) {
+        try {
+            val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+            val device = usbManager.deviceList.values.find { 
+                it.vendorId == vendorId && it.productId == productId 
+            }
+            
+            if (device == null) {
+                val result = TestUsbModesResult().apply {
+                    success = false
+                    error = "USB device with VID:$vendorId PID:$productId not found"
+                }
+                promise.resolve(result)
+                return
+            }
+            
+            if (!usbManager.hasPermission(device)) {
+                // Automatically request permission
+                val permissionIntent = android.app.PendingIntent.getBroadcast(
+                    context, 0, Intent("com.sunmi.scanner.USB_PERMISSION"), 
+                    if (android.os.Build.VERSION.SDK_INT >= 23) android.app.PendingIntent.FLAG_IMMUTABLE else 0
                 )
+                usbManager.requestPermission(device, permissionIntent)
                 
-                for ((mode, modeName) in modes) {
-                    android.util.Log.d("SunmiBarcodeScanner", "Testing mode $mode ($modeName)")
+                val result = TestUsbModesResult().apply {
+                    success = false
+                    error = "USB permission required for device ${device.deviceName}. Permission request sent - please accept the dialog and try again."
+                }
+                promise.resolve(result)
+                return
+            }
+            
+            val capabilities = analyzeUsbDeviceCapabilities(device)
+            val hasHid = hasHidInterface(device)
+            val hasCdc = hasCdcInterface(device)
+            
+            val testResults = mutableListOf<TestModeResult>()
+            
+            // Test different modes based on device capabilities
+            val modesToTest = when {
+                hasHid && hasCdc -> listOf(
+                    Pair(0, "KEYBOARD (Recommended for HID)"),
+                    Pair(1, "USB_COM"),
+                    Pair(2, "BROADCAST")
+                )
+                hasHid -> listOf(
+                    Pair(0, "KEYBOARD (Recommended for HID)"),
+                    Pair(2, "BROADCAST")
+                )
+                hasCdc -> listOf(
+                    Pair(1, "USB_COM (Recommended for CDC)"),
+                    Pair(2, "BROADCAST")
+                )
+                else -> listOf(
+                    Pair(2, "BROADCAST (Default)"),
+                    Pair(0, "KEYBOARD"),
+                    Pair(1, "USB_COM")
+                )
+            }
+            
+            for ((modeType, modeDescription) in modesToTest) {
+                val testResult = TestModeResult().apply {
+                    mode = modeType
+                    description = modeDescription
                     
-                    val intent = Intent(ACTION_USB_DEVICE_SETTING).apply {
-                        putExtra("name", device.deviceName ?: "")
-                        putExtra("pid", device.productId)
-                        putExtra("vid", device.vendorId)
-                        putExtra("type", mode)
-                        putExtra("toast", true) // Enable toast for testing
-                        
-                        // Datalogic-specific extras
-                        putExtra("device_class", device.deviceClass)
-                        putExtra("interface_count", device.interfaceCount)
-                        putExtra("force_config", true) // Force configuration
-                    }
-                    
-                    context.sendBroadcast(intent)
-                    
-                    // Small delay between configurations
                     try {
-                        Thread.sleep(1000)
-                    } catch (e: InterruptedException) {
-                        break
+                        val intent = Intent(ACTION_USB_DEVICE_SETTING).apply {
+                            putExtra("name", device.deviceName ?: "")
+                            putExtra("pid", device.productId)
+                            putExtra("vid", device.vendorId)
+                            putExtra("type", modeType)
+                            putExtra("toast", true) // Enable toast for testing
+                            putExtra("test_mode", true) // Mark as test
+                        }
+                        
+                        context.sendBroadcast(intent)
+                        sent = true
+                        status = "Configuration broadcast sent successfully"
+                        
+                    } catch (e: Exception) {
+                        sent = false
+                        status = "Failed to send configuration: ${e.message}"
                     }
                 }
-                break
+                testResults.add(testResult)
             }
+            
+            val result = TestUsbModesResult().apply {
+                success = true
+                deviceName = device.deviceName ?: "Unknown"
+                this.capabilities = capabilities
+                hasHidInterface = hasHid
+                hasCdcInterface = hasCdc
+                this.testResults = testResults
+                recommendation = when {
+                    hasHid && hasCdc -> "Try KEYBOARD mode first for composite devices like Datalogic scanners"
+                    hasHid -> "Use KEYBOARD mode for HID interface devices"
+                    hasCdc -> "Use USB_COM mode for CDC interface devices"
+                    else -> "Try BROADCAST mode first, then KEYBOARD if needed"
+                }
+            }
+            promise.resolve(result)
+            
+        } catch (e: Exception) {
+            val result = TestUsbModesResult().apply {
+                success = false
+                error = "Failed to test USB modes: ${e.message}"
+            }
+            promise.resolve(result)
+        }
+    }
+
+    /**
+     * Set specific USB scanner mode for a device (useful after testing)
+     */
+    fun setUsbScannerMode(
+        context: Context,
+        vendorId: Int,
+        productId: Int,
+        mode: Int,
+        promise: Promise
+    ) {
+        try {
+            val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+            val device = usbManager.deviceList.values.find { 
+                it.vendorId == vendorId && it.productId == productId 
+            }
+            
+            if (device == null) {
+                val result = SetUsbModeResult().apply {
+                    success = false
+                    error = "USB device with VID:$vendorId PID:$productId not found"
+                }
+                promise.resolve(result)
+                return
+            }
+            
+            if (!usbManager.hasPermission(device)) {
+                // Automatically request permission
+                val permissionIntent = android.app.PendingIntent.getBroadcast(
+                    context, 0, Intent("com.sunmi.scanner.USB_PERMISSION"), 
+                    if (android.os.Build.VERSION.SDK_INT >= 23) android.app.PendingIntent.FLAG_IMMUTABLE else 0
+                )
+                usbManager.requestPermission(device, permissionIntent)
+                
+                val result = SetUsbModeResult().apply {
+                    success = false
+                    error = "USB permission required for device ${device.deviceName}. Permission request sent - please accept the dialog and try again."
+                }
+                promise.resolve(result)
+                return
+            }
+            
+            // Store the device-specific configuration for future reference
+            val deviceKey = "$vendorId:$productId"
+            deviceModeConfigurations[deviceKey] = mode
+            
+            // Update the global USB data type for scanQRCode to use
+            // This ensures that the next scan will use the newly configured mode
+            currentUsbDataType = mode
+            
+            val intent = Intent(ACTION_USB_DEVICE_SETTING).apply {
+                putExtra("name", device.deviceName ?: "")
+                putExtra("pid", device.productId)
+                putExtra("vid", device.vendorId)
+                putExtra("type", mode)
+                putExtra("toast", toastEnabled)
+            }
+            
+            context.sendBroadcast(intent)
+            
+            val modeDescription = when (mode) {
+                0 -> "KEYBOARD"
+                1 -> "USB_COM"
+                2 -> "BROADCAST"
+                else -> "UNKNOWN"
+            }
+            
+            android.util.Log.i("SunmiBarcodeScanner", 
+                "USB scanner mode updated: Device $deviceKey set to mode $mode ($modeDescription). " +
+                "Global currentUsbDataType updated for future scans.")
+            
+            val result = SetUsbModeResult().apply {
+                success = true
+                deviceName = device.deviceName ?: "Unknown"
+                this.mode = mode
+                this.modeDescription = modeDescription
+                message = "USB scanner mode set to $modeDescription (will be used for next scan)"
+            }
+            promise.resolve(result)
+            
+        } catch (e: Exception) {
+            val result = SetUsbModeResult().apply {
+                success = false
+                error = "Failed to set USB scanner mode: ${e.message}"
+            }
+            promise.resolve(result)
         }
     }
 
@@ -716,16 +1042,25 @@ class SunmiBarcodeScanner {
      * Configure scanner based on selected type (USB or Serial)
      */
     private fun configureSelectedScanner(context: Context, scannerType: ScannerType) {
-        when (scannerType) {
-            ScannerType.USB -> {
-                configureUsbScanner(context)
+        try {
+            when (scannerType) {
+                ScannerType.USB -> {
+                    configureUsbScanner(context)
+                }
+                ScannerType.SERIAL -> {
+                    configureSerialScanner(context)
+                }
+                ScannerType.NONE -> {
+                    // No scanners available - this is acceptable when setting priority
+                    android.util.Log.w("SunmiBarcodeScanner", "No scanners available for configuration")
+                }
+                else -> {
+                    throw Exception("Invalid scanner type for configuration: $scannerType")
+                }
             }
-            ScannerType.SERIAL -> {
-                configureSerialScanner(context)
-            }
-            else -> {
-                throw Exception("Invalid scanner type for configuration: $scannerType")
-            }
+        } catch (e: Exception) {
+            // Log the error but don't throw - priority setting should succeed even if no scanners are available
+            android.util.Log.w("SunmiBarcodeScanner", "Failed to configure scanner: ${e.message}")
         }
     }
 

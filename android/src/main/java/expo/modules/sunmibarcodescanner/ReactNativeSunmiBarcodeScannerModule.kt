@@ -125,8 +125,8 @@ class ReactNativeSunmiBarcodeScannerModule : Module() {
       barcodeScanner.requestUsbPermission(context, vendorId, productId)
     }
 
-    Function("testUsbScannerModes") { vendorId: Int, productId: Int ->
-      barcodeScanner.testUsbScannerModes(context, vendorId, productId)
+    Function("getDeviceModeConfigurations") {
+      barcodeScanner.getDeviceModeConfigurations()
     }
 
     AsyncFunction("scanQRCode")  { promise: Promise ->
@@ -135,6 +135,18 @@ class ReactNativeSunmiBarcodeScannerModule : Module() {
 
     AsyncFunction("cancelScan")  { promise: Promise ->
       barcodeScanner.cancelScan(context, promise)
+    }
+
+    AsyncFunction("testUsbScannerModes") { vendorId: Int, productId: Int, promise: Promise ->
+      barcodeScanner.testUsbScannerModes(context, vendorId, productId, promise)
+    }
+
+    AsyncFunction("setUsbScannerMode") { mode: Int ->
+      barcodeScanner.setUsbScannerMode(context, mode)
+    }
+
+    AsyncFunction("setSpecificUsbScannerMode") { vendorId: Int, productId: Int, mode: Int, promise: Promise ->
+      barcodeScanner.setUsbScannerMode(context, vendorId, productId, mode, promise)
     }
 
     // Cleanup when module is destroyed
