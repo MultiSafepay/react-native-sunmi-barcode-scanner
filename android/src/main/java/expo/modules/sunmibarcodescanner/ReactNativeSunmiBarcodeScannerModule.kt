@@ -1,9 +1,9 @@
 package expo.modules.sunmibarcodescanner
 
+import android.app.Activity
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.Promise
-import java.net.URL
 
 class ReactNativeSunmiBarcodeScannerModule : Module() {
 
@@ -18,17 +18,6 @@ class ReactNativeSunmiBarcodeScannerModule : Module() {
     // Can be inferred from module's class name, but it's recommended to set it explicitly for clarity.
     // The module will be accessible from `requireNativeModule('ReactNativeSunmiBarcodeScanner')` in JavaScript.
     Name("ReactNativeSunmiBarcodeScanner")
-
-    // Enables the module to be used as a native view. Definition components that are accepted as part of
-    // the view definition: Prop, Events.
-    View(ReactNativeSunmiBarcodeScannerView::class) {
-      // Defines a setter for the `url` prop.
-      Prop("url") { view: ReactNativeSunmiBarcodeScannerView, url: URL ->
-        view.webView.loadUrl(url.toString())
-      }
-      // Defines an event that the view can send to JavaScript.
-      Events("onLoad")
-    }
 
     // ----------------------------------------
     // Sunmi Barcode Scanner SDK public methods
@@ -47,6 +36,41 @@ class ReactNativeSunmiBarcodeScannerModule : Module() {
       return@Function barcodeScanner.getScannerOperationMode().modeName
     }
 
+    Function("setScannerPriority") { priority: String ->
+      val scannerPriority = ScannerPriority.valueOf(priority)
+      barcodeScanner.setScannerPriority(context, scannerPriority)
+    }
+
+    Function("getScannerPriority") {
+      return@Function barcodeScanner.getScannerPriority().priorityName
+    }
+
+    AsyncFunction("getAvailableScanners") { promise: Promise ->
+      try {
+        val scanners = barcodeScanner.getAvailableScanners(context)
+        val scannersArray = scanners.map { scanner ->
+          mapOf(
+            "type" to scanner.type.typeName,
+            "isConnected" to scanner.isConnected,
+            "deviceName" to scanner.deviceName,
+            "pid" to scanner.pid,
+            "vid" to scanner.vid
+          )
+        }
+        promise.resolve(scannersArray)
+      } catch (e: Exception) {
+        promise.reject("SCANNER_DETECTION_ERROR", e.message, e)
+      }
+    }
+
+    Function("getCurrentScannerType") {
+      return@Function barcodeScanner.getCurrentScannerType().typeName
+    }
+
+    Function("getOptimalScannerType") {
+      return@Function barcodeScanner.getOptimalScannerType(context).typeName
+    }
+
     Function("setScanTimeout") { timeout: Long ->
       barcodeScanner.setScanTimeout(timeout)
     }
@@ -55,12 +79,74 @@ class ReactNativeSunmiBarcodeScannerModule : Module() {
       barcodeScanner.setBeep(enabled)
     }
 
+    Function("setToast") { enabled: Boolean ->
+      barcodeScanner.setToast(enabled)
+    }
+
+    Function("getToast") {
+      barcodeScanner.getToast()
+    }
+
+    Function("setUsbScannerMode") { mode: Int ->
+      barcodeScanner.setUsbScannerMode(context, mode)
+    }
+
+    Function("setDataDistributeType") { type: String ->
+      barcodeScanner.setDataDistributeType(context, type)
+    }
+
+    AsyncFunction("getAllUsbDevices") { promise: Promise ->
+      try {
+        val devices = barcodeScanner.getAllUsbDevices(context)
+        promise.resolve(devices)
+      } catch (e: Exception) {
+        promise.reject("USB_DEVICE_ERROR", e.message, e)
+      }
+    }
+
+    Function("addCompatibleUsbScanner") { productId: Int, vendorId: Int ->
+      barcodeScanner.addCompatibleUsbScanner(productId, vendorId)
+    }
+
+    Function("removeCompatibleUsbScanner") { productId: Int, vendorId: Int ->
+      barcodeScanner.removeCompatibleUsbScanner(productId, vendorId)
+    }
+
+    Function("getCompatibleUsbScanners") {
+      barcodeScanner.getCompatibleUsbScanners()
+    }
+
+    Function("resetCompatibleUsbScanners") {
+      barcodeScanner.resetCompatibleUsbScanners()
+    }
+
+    // USB Troubleshooting methods
+    Function("requestUsbPermission") { vendorId: Int, productId: Int ->
+      barcodeScanner.requestUsbPermission(context, vendorId, productId)
+    }
+
+    Function("getDeviceModeConfigurations") {
+      barcodeScanner.getDeviceModeConfigurations()
+    }
+
     AsyncFunction("scanQRCode")  { promise: Promise ->
       barcodeScanner.scanQRCode(context, promise)
     }
 
     AsyncFunction("cancelScan")  { promise: Promise ->
       barcodeScanner.cancelScan(context, promise)
+    }
+
+    AsyncFunction("testUsbScannerModes") { vendorId: Int, productId: Int, promise: Promise ->
+      barcodeScanner.testUsbScannerModes(context, vendorId, productId, promise)
+    }
+
+    AsyncFunction("setUsbScannerMode") { mode: Int ->
+      barcodeScanner.setUsbScannerMode(context, mode)
+    }
+
+    AsyncFunction("setSpecificUsbScannerMode") { vendorId: Int, productId: Int, mode: Int, promise: Promise ->
+      barcodeScanner.setUsbScannerMode(context, vendorId, productId, mode, promise)
     }
 
     // Cleanup when module is destroyed
